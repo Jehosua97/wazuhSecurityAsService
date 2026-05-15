@@ -1,0 +1,239 @@
+<!-- Local rules for the Wazuh PYME Mexico managed SIEM/XDR demo. -->
+<!-- Correlation syntax validated against Wazuh rule documentation:
+     https://documentation.wazuh.com/current/user-manual/ruleset/ruleset-xml-syntax/rules.html -->
+
+<group name="pyme_mx,managed_soc,">
+  <rule id="100100" level="12">
+    <if_group>web|attack|attacks</if_group>
+    <list field="srcip" lookup="address_match_key">etc/lists/blacklist-alienvault</list>
+    <description>PYME Mexico: source IP found in AlienVault reputation database.</description>
+    <group>threat_intel,alienvault,threat_intel_signal,soc_signal,soc_correlation_seed,internet_facing,critical_asset,pci_dss_11.4,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100110" level="10">
+    <if_group>web|attack|attacks</if_group>
+    <description>PYME Mexico: web attack telemetry detected on monitored business app.</description>
+    <group>web,attack,soc_signal,internet_facing,critical_asset,pci_dss_6.5,pci_dss_10.6.1,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100111" level="8">
+    <match>pyme-demo</match>
+    <description>PYME Mexico: controlled demo event generated for executive report evidence.</description>
+    <group>demo,evidence,soc_signal,executive_reporting,iso_27001_A.16.1.5,lfpdppp,</group>
+  </rule>
+
+  <rule id="100120" level="10" frequency="5" timeframe="300">
+    <if_matched_sid>5716</if_matched_sid>
+    <same_srcip />
+    <description>PYME Mexico: repeated SSH authentication failures from same source.</description>
+    <group>authentication_failed,ssh,identity_attack_signal,soc_signal,soc_correlation_seed,admin_plane,critical_asset,pci_dss_10.2.4,pci_dss_10.2.5,iso_27001_A.9.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100130" level="10">
+    <if_sid>550</if_sid>
+    <match>/opt/pyme-compliance</match>
+    <description>PYME Mexico: compliance evidence or personal-data artifact changed.</description>
+    <group>syscheck,fim,compliance,evidence_tamper_signal,soc_signal,soc_correlation_seed,compliance_scope,critical_asset,pci_dss_11.5,iso_27001_A.12.4.2,iso_27001_A.18.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100131" level="8">
+    <if_sid>554</if_sid>
+    <match>/opt/pyme-compliance</match>
+    <description>PYME Mexico: new compliance evidence file detected.</description>
+    <group>syscheck,compliance,soc_signal,compliance_scope,pci_dss_11.5,iso_27001_A.12.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100132" level="9">
+    <if_sid>550</if_sid>
+    <match>/opt/lab-share</match>
+    <description>PYME Mexico: public lab-share artifact changed; review weak access control.</description>
+    <group>syscheck,sca,evidence_tamper_signal,weak_control_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.9.1.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100140" level="7">
+    <match>pyme-attack-panel</match>
+    <description>PYME Mexico: Juice Shop attack panel executed a controlled lab action.</description>
+    <group>attack_panel,juice_shop,demo,evidence,soc_signal,executive_reporting,iso_27001_A.16.1.5,lfpdppp,</group>
+  </rule>
+
+  <rule id="100141" level="10">
+    <if_sid>100140</if_sid>
+    <match>action=sqli_login</match>
+    <description>PYME Mexico: controlled SQL injection login probe launched against Juice Shop.</description>
+    <group>attack_panel,juice_shop,web,attack,web_attack_signal,soc_signal,soc_correlation_seed,internet_facing,critical_asset,owasp_top_10,pci_dss_6.5.1,pci_dss_10.6.1,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100142" level="9">
+    <if_sid>100140</if_sid>
+    <match>action=xss_search</match>
+    <description>PYME Mexico: controlled XSS search probe launched against Juice Shop.</description>
+    <group>attack_panel,juice_shop,web,attack,web_attack_signal,soc_signal,soc_correlation_seed,internet_facing,critical_asset,owasp_top_10,pci_dss_6.5.7,pci_dss_10.6.1,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100143" level="8">
+    <if_sid>100140</if_sid>
+    <match>action=api_probe</match>
+    <description>PYME Mexico: API reconnaissance probe launched against Juice Shop.</description>
+    <group>attack_panel,juice_shop,web,recon,web_attack_signal,soc_signal,soc_correlation_seed,internet_facing,critical_asset,owasp_top_10,pci_dss_10.6.1,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100144" level="10">
+    <if_sid>100140</if_sid>
+    <match>action=fim_change</match>
+    <description>PYME Mexico: attack panel changed compliance evidence to trigger FIM.</description>
+    <group>attack_panel,juice_shop,syscheck,evidence_tamper_signal,soc_signal,soc_correlation_seed,compliance_scope,critical_asset,pci_dss_11.5,iso_27001_A.12.4.2,iso_27001_A.18.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100145" level="11">
+    <if_sid>100140</if_sid>
+    <match>action=run_all</match>
+    <description>PYME Mexico: full controlled Juice Shop attack scenario executed.</description>
+    <group>attack_panel,juice_shop,web,attack,recon,web_attack_signal,soc_signal,soc_correlation_seed,internet_facing,critical_asset,demo,pci_dss_10.6.1,iso_27001_A.16.1.5,lfpdppp,</group>
+  </rule>
+
+  <rule id="100150" level="12" frequency="3" timeframe="600" ignore="300">
+    <if_matched_group>web_attack_signal</if_matched_group>
+    <description>PYME Mexico SOC: repeated internet-facing attack sequence detected on the same monitored asset.</description>
+    <group>soc_incident,incident_priority_p2,web,attack,recon,internet_facing,critical_asset,pci_dss_10.6.1,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100151" level="12" frequency="2" timeframe="900" ignore="300">
+    <if_matched_group>evidence_tamper_signal</if_matched_group>
+    <description>PYME Mexico SOC: repeated tampering detected in compliance or sensitive evidence paths.</description>
+    <group>soc_incident,incident_priority_p2,syscheck,compliance,compliance_scope,critical_asset,pci_dss_11.5,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100152" level="14" frequency="2" timeframe="900" ignore="600">
+    <if_sid>100130,100132,100144</if_sid>
+    <if_matched_group>web_attack_signal</if_matched_group>
+    <description>PYME Mexico SOC: web attack activity was followed by suspicious evidence or sensitive-path changes on the same asset.</description>
+    <group>soc_incident,incident_priority_p1,web,attack,syscheck,compliance,internet_facing,compliance_scope,critical_asset,pci_dss_10.6.1,pci_dss_11.5,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100153" level="15" frequency="4" timeframe="900" ignore="600">
+    <if_matched_group>soc_correlation_seed</if_matched_group>
+    <description>PYME Mexico SOC: multi-signal attack campaign detected on the same monitored asset.</description>
+    <group>soc_incident,incident_priority_p1,multi_stage_attack,critical_asset,incident_review_required,pci_dss_10.6.1,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100160" level="6">
+    <program_name>metasploit-lab</program_name>
+    <description>PYME Mexico: monitored Metasploit endpoint generated lab telemetry.</description>
+    <group>metasploit_endpoint,red_team_lab,soc_signal,offensive_workstation,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100161" level="8">
+    <if_sid>100160</if_sid>
+    <match>action=msfconsole_launch</match>
+    <description>PYME Mexico: Metasploit console launched on the monitored offensive workstation.</description>
+    <group>metasploit_endpoint,red_team_lab,operator_activity,soc_signal,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100162" level="9">
+    <if_sid>100160</if_sid>
+    <match>action=module_launch</match>
+    <description>PYME Mexico: Metasploit module execution activity detected on the monitored endpoint.</description>
+    <group>metasploit_endpoint,red_team_lab,module_execution,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100163" level="10">
+    <if_sid>100160</if_sid>
+    <match>action=session_event</match>
+    <description>PYME Mexico: Metasploit session-oriented activity detected on the monitored endpoint.</description>
+    <group>metasploit_endpoint,red_team_lab,session_activity,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100164" level="7">
+    <if_sid>100160</if_sid>
+    <match>action=workspace_update</match>
+    <description>PYME Mexico: Metasploit workspace evidence changed on the monitored endpoint.</description>
+    <group>metasploit_endpoint,red_team_lab,evidence,soc_signal,critical_asset,iso_27001_A.12.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100170" level="6">
+    <program_name>gateway-lab</program_name>
+    <description>PYME Mexico: edge gateway lab telemetry detected on monitored network perimeter endpoint.</description>
+    <group>edge_gateway,network_edge,soc_signal,critical_asset,internet_facing,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100171" level="8">
+    <if_sid>100170</if_sid>
+    <match>action=vpn_peer_connected</match>
+    <description>PYME Mexico: simulated VPN peer connection observed on the monitored edge gateway.</description>
+    <group>edge_gateway,network_edge,vpn_activity,soc_signal,critical_asset,remote_access,iso_27001_A.13.1.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100172" level="10">
+    <if_sid>100170</if_sid>
+    <match>action=firewall_drop</match>
+    <description>PYME Mexico: firewall drop telemetry detected on the monitored edge gateway.</description>
+    <group>edge_gateway,network_edge,firewall_event,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,internet_facing,pci_dss_1.4.1,iso_27001_A.13.1.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100173" level="9">
+    <if_sid>100170</if_sid>
+    <match>action=config_change</match>
+    <description>PYME Mexico: gateway firewall or VPN configuration change detected.</description>
+    <group>edge_gateway,network_edge,configuration_change,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_1.2.1,iso_27001_A.12.1.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100180" level="6">
+    <program_name>db-lab</program_name>
+    <description>PYME Mexico: monitored database endpoint generated lab telemetry.</description>
+    <group>database_endpoint,data_tier,soc_signal,critical_asset,compliance_scope,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100181" level="9">
+    <if_sid>100180</if_sid>
+    <match>action=failed_login</match>
+    <description>PYME Mexico: failed database login activity detected on the monitored data tier.</description>
+    <group>database_endpoint,data_tier,authentication_failed,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_8.3.4,iso_27001_A.9.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100182" level="10">
+    <if_sid>100180</if_sid>
+    <match>action=schema_change</match>
+    <description>PYME Mexico: schema or table structure change detected on the monitored database endpoint.</description>
+    <group>database_endpoint,data_tier,schema_change,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_10.2.7,iso_27001_A.12.1.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100183" level="11">
+    <if_sid>100180</if_sid>
+    <match>action=sensitive_query</match>
+    <description>PYME Mexico: simulated access to sensitive customer data detected on the monitored database endpoint.</description>
+    <group>database_endpoint,data_tier,sensitive_data_access,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_10.2.1,iso_27001_A.8.2.3,lfpdppp,</group>
+  </rule>
+
+  <rule id="100190" level="6">
+    <program_name>docker-lab</program_name>
+    <description>PYME Mexico: monitored container host generated lab telemetry.</description>
+    <group>docker_host,container_platform,soc_signal,critical_asset,internet_facing,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100191" level="8">
+    <if_sid>100190</if_sid>
+    <match>action=container_restart</match>
+    <description>PYME Mexico: container restart activity detected on the monitored docker host.</description>
+    <group>docker_host,container_platform,container_runtime,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.1.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100192" level="8">
+    <if_sid>100190</if_sid>
+    <match>action=image_pull</match>
+    <description>PYME Mexico: container image pull detected on the monitored docker host.</description>
+    <group>docker_host,container_platform,image_supply_chain,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.6.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100193" level="9">
+    <if_sid>100190</if_sid>
+    <match>action=config_drift</match>
+    <description>PYME Mexico: configuration drift detected on the monitored container workload.</description>
+    <group>docker_host,container_platform,configuration_change,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,iso_27001_A.12.1.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100194" level="12" frequency="3" timeframe="900" ignore="300">
+    <if_matched_group>infrastructure_signal</if_matched_group>
+    <description>PYME Mexico SOC: repeated infrastructure control-plane activity detected across gateway, database, or container endpoints.</description>
+    <group>soc_incident,incident_priority_p2,infrastructure_incident,critical_asset,compliance_scope,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+</group>

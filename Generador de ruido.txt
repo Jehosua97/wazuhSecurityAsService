@@ -1,0 +1,431 @@
+WAZUH MVP - GENERADOR DE RUIDO Y GUIA DE DEMO PARA CLIENTE
+
+Objetivo
+Este archivo te sirve como runbook rapido para presentar el MVP al cliente.
+Incluye:
+- que hace cada comando
+- en que orden conviene usarlo
+- que deberias mostrar en Wazuh despues
+- que endpoints participan en la demo
+
+
+==================================================
+1. URLs Y ACCESOS DEL DESPLIEGUE ACTUAL
+==================================================
+
+Dashboard Wazuh:
+https://136.114.136.139
+
+Dashboard SOC Ejecutivo:
+https://136.114.136.139/app/dashboards#/view/soc-ejecutivo-dashboard
+
+Dashboard SOC Operativo:
+https://136.114.136.139/app/dashboards#/view/soc-operativo-dashboard
+
+Panel de ataques del sitio web:
+http://35.202.156.185/panel/
+
+Juice Shop / sitio publico:
+http://35.202.156.185
+
+Docker host - portal demo:
+http://136.119.220.137:8081
+
+Credenciales Wazuh:
+Usuario: admin
+Password: SecretPassword
+
+Nota:
+Si vuelves a desplegar o recreas VMs, las IPs pueden cambiar.
+Si quieres recalcularlas:
+
+Comando:
+terraform -chdir="terraform/wazuh-deploy" output
+
+Que hace:
+Muestra las URLs e IPs vigentes del despliegue actual segun el estado de Terraform.
+
+
+==================================================
+2. PREPARACION ANTES DE LA DEMO
+==================================================
+
+2.1. Reimportar dashboards SOC
+
+Comando:
+.\scripts\import-wazuh-dashboards.ps1
+
+Que hace:
+Vuelve a cargar en Wazuh los dashboards "SOC Ejecutivo - PYME Mexico" y
+"SOC Operativo - PYME Mexico".
+
+Cuando usarlo:
+Antes de una demo, si quieres asegurarte de que los dashboards ya estan creados.
+
+
+2.2. Verificar que todos los agentes esten activos
+
+Comando:
+gcloud compute ssh wazuh-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo docker exec -i single-node_wazuh.manager_1 /var/ossec/bin/agent_control -l"
+
+Que hace:
+Consulta el manager Wazuh y lista todos los agentes registrados y su estado.
+
+Que deberias ver:
+- pyme-demo-target
+- metasploit-node
+- edge-gateway
+- db-server
+- docker-host
+
+Mensaje para el cliente:
+"Aqui estamos viendo que no solo monitoreamos una maquina, sino toda una
+mini infraestructura con distintas capas: aplicacion web, endpoint ofensivo,
+perimetro, base de datos y contenedores."
+
+
+2.3. Obtener alertas recientes directamente desde el manager
+
+Comando:
+gcloud compute ssh wazuh-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo docker exec -i single-node_wazuh.manager_1 /bin/sh -c 'tail -n 80 /var/ossec/logs/alerts/alerts.json'"
+
+Que hace:
+Te deja ver las alertas mas recientes sin entrar al dashboard.
+
+Cuando usarlo:
+Si quieres validar rapido que la telemetria ya llego antes de ensenar la UI.
+
+
+==================================================
+3. GENERADORES DE RUIDO POR ENDPOINT
+==================================================
+
+3.1. Sitio web / Juice Shop / evidencia FIM
+
+Comando:
+gcloud compute ssh pyme-demo-target --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/pyme-demo-generate-events.sh"
+
+Que hace:
+Genera una tanda controlada de eventos en el endpoint web principal.
+Simula:
+- fallo de autenticacion SSH
+- intento web sospechoso
+- cambio en evidencia de cumplimiento
+- cambio en carpeta de share con control debil
+- evento tipo executive reporting
+
+Que mostrar despues en Wazuh:
+- reglas 100140-100145 si usaste el panel
+- reglas 100150-100153 para correlacion web/FIM
+- FIM sobre /opt/pyme-compliance
+
+Mensaje para el cliente:
+"Aqui demostramos que Wazuh no solo ve ataques web, tambien detecta cambios
+en evidencia sensible y los correlaciona como incidente."
+
+
+3.2. Endpoint ofensivo monitoreado
+
+Comando:
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/metasploit-demo-generate-events.sh"
+
+Que hace:
+Genera actividad controlada del workstation ofensivo.
+Simula:
+- apertura de consola de Metasploit
+- ejecucion de modulo
+- eventos de sesion
+- cambio de workspace/evidencia
+
+Que mostrar despues en Wazuh:
+- reglas 100160-100164
+- timeline del agente metasploit-node
+
+Mensaje para el cliente:
+"Tambien podemos monitorear estaciones de pentesting o administracion
+privilegiada para tener trazabilidad completa."
+
+
+3.3. Perimetro - firewall / VPN
+
+Comando:
+gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/gateway-demo-generate-events.sh"
+
+Que hace:
+Genera telemetria del edge gateway.
+Simula:
+- conexion de peer VPN
+- bloqueo por firewall
+- cambio de configuracion del gateway
+
+Que mostrar despues en Wazuh:
+- reglas 100171, 100172, 100173
+- regla 100194 si hay suficiente actividad de infraestructura
+
+Mensaje para el cliente:
+"Aqui se ve el valor de monitorear el perimetro y no solo servidores
+individuales."
+
+
+3.4. Base de datos
+
+Comando:
+gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/db-demo-generate-events.sh"
+
+Que hace:
+Genera telemetria del servidor de base de datos.
+Simula:
+- login fallido
+- cambio de esquema
+- acceso a datos sensibles
+
+Que mostrar despues en Wazuh:
+- reglas 100181, 100182, 100183
+- regla 100194 por correlacion de infraestructura
+
+Mensaje para el cliente:
+"Esto es importante para sectores con datos sensibles o datos personales,
+porque el valor no esta solo en el servidor sino en lo que pasa con la data."
+
+
+3.5. Docker host
+
+Comando:
+gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
+
+Que hace:
+Genera telemetria del host de contenedores.
+Simula:
+- restart de contenedor
+- pull de imagen
+- config drift en el portal web
+
+Que mostrar despues en Wazuh:
+- reglas 100191, 100192, 100193
+- regla 100194 por correlacion de infraestructura
+
+Mensaje para el cliente:
+"Esto nos ayuda a hablar de visibilidad sobre cargas modernas y supply chain
+en Docker."
+
+
+==================================================
+4. COMANDOS EXTRA QUE FALTABAN PARA UNA DEMO COMPLETA
+==================================================
+
+4.1. Abrir la consola wrapper de Metasploit
+
+Comando:
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/msf-lab-console"
+
+Que hace:
+Te conecta al endpoint Metasploit para demostrar que existe un workstation
+ofensivo real dentro del laboratorio.
+
+Cuando usarlo:
+Si el cliente pregunta "de donde vienen esas alertas del endpoint ofensivo?"
+
+
+4.2. Ver la configuracion preparada del peer VPN
+
+Comando:
+gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo cat /opt/gateway-lab/sample-peer.conf"
+
+Que hace:
+Muestra el archivo de ejemplo del peer WireGuard preparado en el edge gateway.
+
+Cuando usarlo:
+Si quieres explicar que el laboratorio tambien cubre acceso remoto y borde de red.
+
+
+4.3. Ver el portal del docker host desde consola
+
+Comando:
+gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="curl -s http://127.0.0.1:8081 | head -n 20"
+
+Que hace:
+Muestra el HTML del portal demo que corre en el host de contenedores.
+
+Cuando usarlo:
+Si quieres comprobar rapido que la app sigue viva despues del ruido.
+
+
+4.4. Ver si ya disparo la correlacion de infraestructura
+
+Comando:
+gcloud compute ssh wazuh-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo docker exec -i single-node_wazuh.manager_1 /bin/sh -c 'grep 100194 /var/ossec/logs/alerts/alerts.json | tail -n 5'"
+
+Que hace:
+Busca en las alertas del manager si ya se disparo la regla 100194.
+
+Por que importa:
+Es la mejor evidencia para ensenar que Wazuh no solo muestra eventos sueltos,
+sino incidentes correlacionados.
+
+
+4.5. Reaplicar configuracion Wazuh si cambiaste reglas o tuning
+
+Comando:
+.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"
+
+Que hace:
+Sube otra vez el contenido de terraform/config/wazuh-manager al server Wazuh.
+
+Cuando usarlo:
+Solo si cambiaste reglas, listas o configuracion del manager.
+
+
+==================================================
+5. CONSULTAS QUE DEBES TENER LISTAS EN WAZUH
+==================================================
+
+Consulta general SOC:
+rule.groups: (soc_signal or soc_incident)
+
+Que muestra:
+Todo lo relevante del MVP con foco SOC.
+
+
+Consulta para perimetro:
+agent.name: "edge-gateway" and rule.groups: edge_gateway
+
+Que muestra:
+Actividad de firewall y VPN.
+
+
+Consulta para base de datos:
+agent.name: "db-server" and rule.groups: database_endpoint
+
+Que muestra:
+Acceso sensible, cambios de esquema y fallos de autenticacion.
+
+
+Consulta para contenedores:
+agent.name: "docker-host" and rule.groups: docker_host
+
+Que muestra:
+Runtime, image pulls y drift de configuracion.
+
+
+Consulta para endpoint ofensivo:
+agent.name: "metasploit-node" and rule.groups: metasploit_endpoint
+
+Que muestra:
+Uso del workstation ofensivo monitoreado.
+
+
+Consulta para web app:
+agent.name: "pyme-demo-target" and rule.groups: (soc_signal or soc_incident)
+
+Que muestra:
+Ataques web, FIM, evidencia y correlacion del sitio principal.
+
+
+Consulta de incidente correlacionado:
+rule.groups: infrastructure_incident
+
+Que muestra:
+La regla 100194 y otros incidentes de infraestructura ya agregados.
+
+
+==================================================
+6. ORDEN SUGERIDO PARA PRESENTAR EL MVP AL CLIENTE
+==================================================
+
+Paso 1.
+Abre el dashboard ejecutivo.
+
+Que decir:
+"Esto es lo que un director o cliente final veria: riesgo visible,
+activos criticos, cumplimiento y superficie expuesta."
+
+
+Paso 2.
+Abre el dashboard operativo.
+
+Que decir:
+"Aqui esta la vista del analista, donde bajamos de incidente a evidencia."
+
+
+Paso 3.
+Genera ruido en edge-gateway.
+
+Comando:
+gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/gateway-demo-generate-events.sh"
+
+Que decir:
+"Empezamos en el borde: VPN, firewall y configuracion."
+
+
+Paso 4.
+Genera ruido en db-server.
+
+Comando:
+gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/db-demo-generate-events.sh"
+
+Que decir:
+"Ahora nos movemos a la capa de datos, donde esta el riesgo real del negocio."
+
+
+Paso 5.
+Genera ruido en docker-host.
+
+Comando:
+gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
+
+Que decir:
+"Aqui mostramos workloads modernos y supply chain."
+
+
+Paso 6.
+Cierra con el sitio web y el panel visual.
+
+Accion:
+Abre http://35.202.156.185/panel/
+
+Que decir:
+"Aqui el cliente puede ver visualmente el ataque controlado y luego su
+deteccion en el SOC."
+
+
+Paso 7.
+Si quieres demostrar trazabilidad ofensiva, usa Metasploit.
+
+Comando:
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/metasploit-demo-generate-events.sh"
+
+Que decir:
+"Tambien vemos la actividad del endpoint ofensivo, lo cual sirve para
+equipos internos, MSSP o consultoria."
+
+
+==================================================
+7. BLOQUE RAPIDO - TODO EN ORDEN
+==================================================
+
+Si quieres generar toda la historia de demo en secuencia:
+
+gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/gateway-demo-generate-events.sh"
+gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/db-demo-generate-events.sh"
+gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/metasploit-demo-generate-events.sh"
+gcloud compute ssh pyme-demo-target --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/pyme-demo-generate-events.sh"
+
+Que hace:
+Ejecuta una secuencia completa de ruido across toda la infraestructura.
+
+Que mostrar despues:
+- Dashboard SOC Operativo
+- consulta rule.groups: infrastructure_incident
+- timeline por agent.name
+
+
+==================================================
+8. MENSAJE FINAL PARA LA DEMO
+==================================================
+
+Idea fuerza:
+"No estamos mostrando un SIEM generico. Estamos mostrando un servicio SOC
+gestionado que cubre web, endpoints, infraestructura, datos sensibles,
+contenedores y perimetro, y que ademas correlaciona la actividad en una
+historia entendible para operacion y para direccion."

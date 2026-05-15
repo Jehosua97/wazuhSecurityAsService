@@ -1,0 +1,492 @@
+#!/bin/bash
+
+set -euo pipefail
+
+LOG_FILE="/var/log/startup.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec >>"$LOG_FILE" 2>&1
+
+handle_error() {
+    echo "Error on line $1"
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+WAZUH_MANAGER_IP="${wazuh_manager_ip}"
+WAZUH_AGENT_NAME="${wazuh_agent_name}"
+JUICE_SHOP_PORT="${juice_shop_port}"
+WAZUH_VERSION="${wazuh_version}"
+DEMO_COMPANY_NAME="${demo_company_name}"
+COMPLIANCE_PROFILE="${compliance_profile}"
+ATTACK_LOG="/var/log/pyme-attack-panel.log"
+
+echo "Starting monitored PYME target setup..."
+echo "Using Wazuh manager at $WAZUH_MANAGER_IP"
+
+wait_for_manager() {
+    for attempt in $(seq 1 90); do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$WAZUH_MANAGER_IP/1515" 2>/dev/null; then
+            echo "Wazuh manager authd is reachable."
+            return 0
+        fi
+
+        echo "Waiting for Wazuh manager authd on $WAZUH_MANAGER_IP:1515 (attempt $attempt/90)..."
+        sleep 10
+    done
+
+    echo "Timed out waiting for Wazuh manager authd."
+    return 1
+}
+
+echo "Installing base packages..."
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    apache2 \
+    apt-transport-https \
+    auditd \
+    ca-certificates \
+    curl \
+    docker.io \
+    gnupg \
+    python3
+
+echo "Preparing Apache modules for the attack control panel..."
+a2enmod alias cgid headers proxy proxy_http >/dev/null
+a2enconf serve-cgi-bin >/dev/null
+
+touch "$ATTACK_LOG"
+chown www-data:adm "$ATTACK_LOG"
+chmod 664 "$ATTACK_LOG"
+
+echo "Creating compliance and IT hygiene demo artifacts..."
+mkdir -p /opt/pyme-compliance/customer-data /opt/pyme-compliance/evidence /opt/lab-share
+cat >/opt/pyme-compliance/customer-data/clientes-demo.csv <<'EOF'
+id,nombre,email,tipo_dato,proposito
+1,Ana Demo,ana.demo@example.com,personal,crm
+2,Carlos Demo,carlos.demo@example.com,personal,soporte
+3,Patricia Demo,patricia.demo@example.com,personal,pagos
+EOF
+cat >/opt/pyme-compliance/evidence/control-map.md <<EOF
+# Control map
+
+- LFPDPPP: evidencia de acceso y cambios a datos personales.
+- PCI-DSS v4.0: logging, monitoreo de integridad y alertas de seguridad.
+- ISO 27001:2022: controles de operacion, eventos e incidentes.
+EOF
+echo "demo-lab-artifact" >/opt/lab-share/README.txt
+chmod 750 /opt/pyme-compliance
+chmod 640 /opt/pyme-compliance/customer-data/clientes-demo.csv
+chmod 777 /opt/lab-share
+chown -R root:www-data /opt/pyme-compliance/evidence
+chmod 770 /opt/pyme-compliance/evidence
+
+echo "Configuring Apache reverse proxy and attack control panel..."
+mkdir -p /var/www/panel /var/www/empty
+cat >/var/www/panel/index.html <<EOF
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>$DEMO_COMPANY_NAME | Juice Shop Attack Control Center</title>
+    <style>
+      :root {
+        --ink: #18201a;
+        --muted: #677064;
+        --paper: #fffaf0;
+        --panel: #ffffff;
+        --line: #dfd3bd;
+        --accent: #b65f19;
+        --accent-2: #1f6f57;
+        --danger: #9d2424;
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; background: radial-gradient(circle at top left, #ffe0a8 0, transparent 34%), #f5f1e8; color: var(--ink); font-family: system-ui, sans-serif; }
+      header { padding: 24px clamp(18px, 4vw, 48px); display: flex; gap: 18px; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); background: rgba(255, 250, 240, .88); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 3; }
+      h1 { margin: 0; font-size: clamp(24px, 4vw, 42px); letter-spacing: -.04em; }
+      .eyebrow { color: var(--accent); font-weight: 800; text-transform: uppercase; letter-spacing: .08em; font-size: 12px; margin-bottom: 6px; }
+      .status { border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; background: #fff; color: var(--muted); font-size: 14px; }
+      main { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); min-height: calc(100vh - 96px); }
+      aside { padding: 24px; border-right: 1px solid var(--line); background: rgba(255, 255, 255, .72); }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 20px; margin-bottom: 18px; box-shadow: 0 18px 50px rgba(48, 38, 20, .08); }
+      .card h2 { margin: 0 0 10px; font-size: 20px; }
+      .card p { color: var(--muted); line-height: 1.5; margin: 8px 0 14px; }
+      .grid { display: grid; gap: 10px; }
+      button, .open-link { width: 100%; border: 0; border-radius: 14px; padding: 13px 14px; font-weight: 800; cursor: pointer; background: var(--ink); color: #fff; text-align: left; text-decoration: none; display: block; }
+      button:hover, .open-link:hover { transform: translateY(-1px); }
+      button.secondary { background: var(--accent-2); }
+      button.warning { background: var(--accent); }
+      button.danger { background: var(--danger); }
+      code { background: #f1e8d6; padding: 3px 7px; border-radius: 7px; }
+      #result, #history { min-height: 120px; white-space: pre-wrap; background: #10150f; color: #d7f5d3; border-radius: 14px; padding: 14px; font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; overflow: auto; max-height: 290px; }
+      .stage { padding: 24px; }
+      .frame-wrap { height: calc(100vh - 144px); border: 1px solid var(--line); border-radius: 24px; overflow: hidden; background: #111; box-shadow: 0 24px 80px rgba(26, 20, 12, .2); }
+      iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+      @media (max-width: 980px) {
+        main { grid-template-columns: 1fr; }
+        aside { border-right: 0; border-bottom: 1px solid var(--line); }
+        .frame-wrap { height: 680px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <div class="eyebrow">Wazuh gestionado para PYMES mexicanas</div>
+        <h1>Juice Shop Attack Control Center</h1>
+      </div>
+      <div class="status">Target: <strong id="targetUrl">loading...</strong></div>
+    </header>
+
+    <main>
+      <aside>
+        <section class="card">
+          <h2>Laboratorio controlado</h2>
+          <p>Estos botones ejecutan pruebas seguras contra el Juice Shop local y generan evidencia para Wazuh. Usalos solo en este lab.</p>
+          <p>Cumplimiento demo: <code>$COMPLIANCE_PROFILE</code></p>
+          <a class="open-link" id="openJuice" href="#" target="_blank" rel="noreferrer">Abrir Juice Shop en pestana nueva</a>
+        </section>
+
+        <section class="card">
+          <h2>Activar pruebas</h2>
+          <div class="grid">
+            <button onclick="runAttack('sqli_login')">1. SQLi login controlado</button>
+            <button class="warning" onclick="runAttack('xss_search')">2. XSS search probe</button>
+            <button class="secondary" onclick="runAttack('api_probe')">3. Recon de API y productos</button>
+            <button class="secondary" onclick="runAttack('fim_change')">4. Cambio FIM de evidencia</button>
+            <button class="danger" onclick="runAttack('run_all')">Ejecutar todas las pruebas</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Resultado inmediato</h2>
+          <pre id="result">Listo. Elige una prueba para generar telemetria.</pre>
+        </section>
+
+        <section class="card">
+          <h2>Historial visible</h2>
+          <pre id="history">Cargando historial...</pre>
+        </section>
+      </aside>
+
+      <section class="stage">
+        <div class="frame-wrap">
+          <iframe id="juiceFrame" title="OWASP Juice Shop"></iframe>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const juiceUrl = window.location.origin + '/';
+      const apiUrl = window.location.origin + '/cgi-bin/juicy-attack.py';
+
+      document.getElementById('juiceFrame').src = juiceUrl;
+      document.getElementById('targetUrl').textContent = juiceUrl;
+      document.getElementById('openJuice').href = juiceUrl;
+
+      async function runAttack(action) {
+        const result = document.getElementById('result');
+        result.textContent = 'Ejecutando ' + action + '...';
+        try {
+          const response = await fetch(apiUrl + '?action=' + encodeURIComponent(action), { cache: 'no-store' });
+          const data = await response.json();
+          result.textContent = JSON.stringify(data, null, 2);
+          await loadHistory();
+        } catch (error) {
+          result.textContent = 'Error ejecutando prueba: ' + error;
+        }
+      }
+
+      async function loadHistory() {
+        try {
+          const response = await fetch(apiUrl + '?action=history', { cache: 'no-store' });
+          const data = await response.json();
+          document.getElementById('history').textContent = data.lines.join('\\n') || 'Sin eventos todavia.';
+        } catch (error) {
+          document.getElementById('history').textContent = 'No se pudo leer historial: ' + error;
+        }
+      }
+
+      loadHistory();
+      setInterval(loadHistory, 8000);
+    </script>
+  </body>
+</html>
+EOF
+
+cat >/etc/apache2/sites-available/000-default.conf <<EOF
+<VirtualHost *:80>
+    ServerAdmin webmaster@localhost
+    DocumentRoot /var/www/empty
+
+    ProxyRequests Off
+    ProxyPreserveHost On
+
+    ProxyPass /panel !
+    ProxyPass /cgi-bin !
+    ProxyPass / http://127.0.0.1:$JUICE_SHOP_PORT/ retry=0 connectiontimeout=5 timeout=30
+    ProxyPassReverse / http://127.0.0.1:$JUICE_SHOP_PORT/
+
+    Alias /panel /var/www/panel
+    <Directory /var/www/panel>
+        AllowOverride None
+        DirectoryIndex index.html
+        Options FollowSymLinks
+        Require all granted
+    </Directory>
+
+    ScriptAlias /cgi-bin/ /usr/lib/cgi-bin/
+    <Directory /usr/lib/cgi-bin>
+        AllowOverride None
+        Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch
+        Require all granted
+    </Directory>
+
+    ErrorLog /var/log/apache2/error.log
+    CustomLog /var/log/apache2/access.log combined
+</VirtualHost>
+EOF
+
+cat >/usr/lib/cgi-bin/juicy-attack.py <<EOF
+#!/usr/bin/env python3
+import datetime
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+JUICE_URL = "http://127.0.0.1:$JUICE_SHOP_PORT"
+ATTACK_LOG = "$ATTACK_LOG"
+EVIDENCE_FILE = "/opt/pyme-compliance/evidence/attack-panel-evidence.log"
+
+
+def response(payload, status="200 OK"):
+    print(f"Status: {status}")
+    print("Content-Type: application/json")
+    print("Cache-Control: no-store")
+    print()
+    print(json.dumps(payload, indent=2, ensure_ascii=True))
+
+
+def syslog_date():
+    return datetime.datetime.now().strftime("%b %e %H:%M:%S")
+
+
+def iso_date():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def read_action():
+    query = urllib.parse.parse_qs(os.environ.get("QUERY_STRING", ""))
+    return query.get("action", ["history"])[0]
+
+
+def log_line(action, outcome, detail):
+    safe_detail = detail.replace("\\n", " ").replace('"', "'")[:500]
+    line = f"{syslog_date()} pyme-demo-target pyme-attack-panel: action={action} outcome={outcome} detail={safe_detail}"
+    with open(ATTACK_LOG, "a", encoding="utf-8") as fh:
+        fh.write(line + "\\n")
+    subprocess.run(["logger", "-t", "pyme-attack-panel", f"action={action} outcome={outcome} detail={safe_detail}"], check=False)
+    return line
+
+
+def http_call(method, path, body=None, headers=None):
+    headers = headers or {}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(JUICE_URL + path, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            content = resp.read(400).decode("utf-8", errors="replace")
+            return {"method": method, "path": path, "status": resp.status, "body_sample": content}
+    except urllib.error.HTTPError as exc:
+        content = exc.read(400).decode("utf-8", errors="replace")
+        return {"method": method, "path": path, "status": exc.code, "body_sample": content}
+    except Exception as exc:
+        return {"method": method, "path": path, "status": "error", "body_sample": str(exc)}
+
+
+def action_sqli_login():
+    payload = {"email": "' OR 1=1--", "password": "demo-lab-only"}
+    result = http_call("POST", "/rest/user/login", payload)
+    log_line("sqli_login", "completed", f"POST /rest/user/login returned {result['status']}")
+    return {"title": "SQLi login controlado", "requests": [result]}
+
+
+def action_xss_search():
+    encoded = urllib.parse.quote('<script>alert("wazuh-demo")</script>')
+    result = http_call("GET", f"/rest/products/search?q={encoded}")
+    log_line("xss_search", "completed", f"GET /rest/products/search XSS probe returned {result['status']}")
+    return {"title": "XSS search probe", "requests": [result]}
+
+
+def action_api_probe():
+    requests = [
+        http_call("GET", "/api/Challenges"),
+        http_call("GET", "/rest/products/search?q=admin"),
+        http_call("GET", "/rest/admin/application-configuration"),
+    ]
+    status_summary = ",".join(str(item["status"]) for item in requests)
+    log_line("api_probe", "completed", f"API reconnaissance statuses={status_summary}")
+    return {"title": "Recon de API y productos", "requests": requests}
+
+
+def action_fim_change():
+    os.makedirs(os.path.dirname(EVIDENCE_FILE), exist_ok=True)
+    with open(EVIDENCE_FILE, "a", encoding="utf-8") as fh:
+        fh.write(f"{iso_date()} attack-panel changed compliance evidence\\n")
+    log_line("fim_change", "completed", f"Updated {EVIDENCE_FILE}")
+    return {"title": "Cambio FIM de evidencia", "requests": [{"file": EVIDENCE_FILE, "status": "updated"}]}
+
+
+def action_run_all():
+    results = [action_sqli_login(), action_xss_search(), action_api_probe(), action_fim_change()]
+    log_line("run_all", "completed", "Executed all controlled Juice Shop demo probes")
+    return {"title": "Todas las pruebas controladas", "results": results}
+
+
+def action_history():
+    if not os.path.exists(ATTACK_LOG):
+        return {"lines": []}
+    with open(ATTACK_LOG, "r", encoding="utf-8", errors="replace") as fh:
+        return {"lines": [line.rstrip("\\n") for line in fh.readlines()[-40:]]}
+
+
+ACTIONS = {
+    "sqli_login": action_sqli_login,
+    "xss_search": action_xss_search,
+    "api_probe": action_api_probe,
+    "fim_change": action_fim_change,
+    "run_all": action_run_all,
+    "history": action_history,
+}
+
+try:
+    action = read_action()
+    if action not in ACTIONS:
+        log_line(action, "rejected", "Unknown action requested")
+        response({"error": "unknown action", "allowed": sorted(ACTIONS)}, "400 Bad Request")
+    else:
+        payload = ACTIONS[action]()
+        payload["action"] = action
+        payload["timestamp"] = iso_date()
+        response(payload)
+except Exception as exc:
+    log_line("internal_error", "failed", str(exc))
+    response({"error": str(exc)}, "500 Internal Server Error")
+EOF
+chmod 755 /usr/lib/cgi-bin/juicy-attack.py
+
+systemctl enable apache2
+systemctl restart apache2
+systemctl enable auditd
+systemctl restart auditd
+
+echo "Starting Juice Shop container..."
+systemctl enable docker
+systemctl restart docker
+docker rm -f juice-shop >/dev/null 2>&1 || true
+docker pull bkimminich/juice-shop
+docker run -d \
+    --name juice-shop \
+    --restart unless-stopped \
+    -p "$JUICE_SHOP_PORT:3000" \
+    bkimminich/juice-shop
+
+wait_for_manager
+
+echo "Installing Wazuh agent..."
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH \
+    | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+chmod 644 /usr/share/keyrings/wazuh.gpg
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
+    >/etc/apt/sources.list.d/wazuh.list
+
+apt-get update
+if ! WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+     WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+     WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+     DEBIAN_FRONTEND=noninteractive apt-get install -y "wazuh-agent=$WAZUH_VERSION"; then
+    echo "Pinned Wazuh agent $WAZUH_VERSION was unavailable. Installing latest 4.x agent."
+    WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+    WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+    WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wazuh-agent
+fi
+
+apt-mark hold wazuh-agent
+
+if ! grep -q "pyme-compliance" /var/ossec/etc/ossec.conf; then
+    cat >>/var/ossec/etc/ossec.conf <<'EOF'
+<ossec_config>
+  <localfile>
+    <log_format>apache</log_format>
+    <location>/var/log/apache2/access.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>apache</log_format>
+    <location>/var/log/apache2/error.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/syslog</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/pyme-attack-panel.log</location>
+  </localfile>
+
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>900</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <directories realtime="yes" report_changes="yes">/opt/pyme-compliance</directories>
+    <directories realtime="yes" report_changes="yes">/var/www/panel</directories>
+    <directories realtime="yes">/opt/lab-share</directories>
+  </syscheck>
+</ossec_config>
+EOF
+fi
+
+cat >/usr/local/bin/pyme-demo-generate-events.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+echo "Generating controlled Wazuh demo events..."
+
+echo "$(date '+%b %e %H:%M:%S') pyme-demo-target sshd[4242]: Failed password for invalid user admin from 203.0.113.66 port 49152 ssh2" >> /var/log/auth.log
+echo "203.0.113.66 - - [$(date '+%d/%b/%Y:%H:%M:%S %z')] \"GET /rest/user/login?email=admin@example.com'OR'1'='1 HTTP/1.1\" 401 512" >> /var/log/apache2/access.log
+echo "$(date '+%b %e %H:%M:%S') pyme-demo-target pyme-attack-panel: action=scripted_demo outcome=completed detail=\"manual event generator ran\"" >> /var/log/pyme-attack-panel.log
+echo "Demo compliance evidence changed at $(date -Is)" >> /opt/pyme-compliance/evidence/access-review.log
+echo "temporary-public-share=$(date -Is)" >> /opt/lab-share/README.txt
+chmod 666 /opt/pyme-compliance/customer-data/clientes-demo.csv
+logger -t pyme-demo "Executive report event: possible weak access control and web attack telemetry generated"
+
+echo "Events generated. Review Wazuh alerts, FIM, SCA and vulnerability views."
+EOF
+chmod +x /usr/local/bin/pyme-demo-generate-events.sh
+
+echo "Starting Wazuh agent..."
+systemctl enable wazuh-agent
+systemctl restart wazuh-agent
+
+echo "Generating one initial low-risk demo event after agent registration..."
+/usr/local/bin/pyme-demo-generate-events.sh || true
+
+echo "Monitored PYME target setup completed successfully."

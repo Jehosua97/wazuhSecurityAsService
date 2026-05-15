@@ -1,0 +1,36 @@
+name: Update Wazuh Configuration
+
+on:
+  push:
+    paths:
+      - 'terraform/config/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy Wazuh configuration'
+        required: true
+        default: 'dev'
+
+jobs:
+    deploy-config:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: Authenticate to GCP
+              uses: google-github-actions/auth@v1
+              with:
+                credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+              
+            - name: Setup Google Cloud SDK
+              uses: google-github-actions/setup-gcloud@v1
+              with:
+                project_id: ${{ secrets.GCP_PROJECT_ID }}
+                service_account_key: ${{ secrets.GCP_CREDENTIALS }}
+            - name: Copy configuration files and deploy
+              run: |
+                gcloud compute ssh wazuh-server --quiet --zone=${{ secrets.ZONE }} --command="sudo rm -rf /tmp/wazuh-manager"
+                gcloud compute ssh wazuh-server --quiet --zone=${{ secrets.ZONE }} --command="mkdir -p /tmp/wazuh-manager"
+                gcloud compute scp --quiet --recurse --zone=${{ secrets.ZONE }} terraform/config/wazuh-manager/* wazuh-server:/tmp/wazuh-manager/
+                gcloud compute ssh wazuh-server --quiet --zone=${{ secrets.ZONE }} --command="sudo chmod +x /tmp/wazuh-manager/deploy.sh && sudo /tmp/wazuh-manager/deploy.sh"

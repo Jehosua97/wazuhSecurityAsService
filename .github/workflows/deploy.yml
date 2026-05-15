@@ -1,0 +1,60 @@
+name: Terraform Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy Wazuh'
+        required: true
+        default: 'dev'
+        
+        
+
+jobs:
+  terraform:
+    name: 'Deploy Wazuh'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+
+    - name: Authenticate to GCP
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+
+    - name: Initialize Terraform
+      env:
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_zone: ${{ secrets.ZONE }}
+      run: terraform -chdir=terraform/wazuh-deploy init -input=false
+
+    - name: Verify Environment Variable
+      env:
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+      run: |
+        if [ -z "$TF_VAR_gcp_credentials" ]; then
+          echo "TF_VAR_gcp_credentials is not set"
+          exit 1
+        else
+          echo "TF_VAR_gcp_credentials is set"
+        fi
+
+    - name: Terraform Plan
+      env:
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_zone: ${{ secrets.ZONE }}
+      run: terraform -chdir=terraform/wazuh-deploy plan -input=false -out=tfplan
+
+    - name: Terraform Apply
+      env:
+        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
+        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+        TF_VAR_zone: ${{ secrets.ZONE }}
+      run: terraform -chdir=terraform/wazuh-deploy apply -input=false -auto-approve tfplan

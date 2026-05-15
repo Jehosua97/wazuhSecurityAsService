@@ -1,0 +1,203 @@
+#!/bin/bash
+
+set -euo pipefail
+
+LOG_FILE="/var/log/startup.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec >>"$LOG_FILE" 2>&1
+
+handle_error() {
+    echo "Error on line $1"
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+WAZUH_MANAGER_IP="${wazuh_manager_ip}"
+WAZUH_AGENT_NAME="${wazuh_agent_name}"
+WAZUH_VERSION="${wazuh_version}"
+METASPLOIT_WORKSPACE_NAME="${metasploit_workspace_name}"
+METASPLOIT_LOG="/var/log/metasploit-lab.log"
+
+echo "Starting Metasploit lab endpoint setup..."
+echo "Using Wazuh manager at $WAZUH_MANAGER_IP"
+
+wait_for_manager() {
+    for attempt in $(seq 1 90); do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$WAZUH_MANAGER_IP/1515" 2>/dev/null; then
+            echo "Wazuh manager authd is reachable."
+            return 0
+        fi
+
+        echo "Waiting for Wazuh manager authd on $WAZUH_MANAGER_IP:1515 (attempt $attempt/90)..."
+        sleep 10
+    done
+
+    echo "Timed out waiting for Wazuh manager authd."
+    return 1
+}
+
+find_binary() {
+    local binary="$1"
+    local binary_path=""
+
+    binary_path="$(command -v "$binary" 2>/dev/null || true)"
+    if [ -n "$binary_path" ]; then
+        printf '%s\n' "$binary_path"
+        return 0
+    fi
+
+    binary_path="$(find /opt -type f -path "*/bin/$binary" 2>/dev/null | head -n 1 || true)"
+    if [ -n "$binary_path" ]; then
+        printf '%s\n' "$binary_path"
+        return 0
+    fi
+
+    return 1
+}
+
+log_msf_event() {
+    local action="$1"
+    local detail="$2"
+    local safe_detail
+    safe_detail="$(printf '%s' "$detail" | tr '\n' ' ' | cut -c1-500)"
+    local line
+    line="$(date '+%b %e %H:%M:%S') $WAZUH_AGENT_NAME metasploit-lab: action=$action detail=$safe_detail"
+    echo "$line" >> "$METASPLOIT_LOG"
+    logger -t metasploit-lab "action=$action detail=$safe_detail"
+}
+
+echo "Installing base packages..."
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    python3 \
+    tmux
+
+touch "$METASPLOIT_LOG"
+chown root:adm "$METASPLOIT_LOG"
+chmod 664 "$METASPLOIT_LOG"
+
+echo "Preparing Metasploit workspace artifacts..."
+mkdir -p "/opt/metasploit-lab/workspaces/$METASPLOIT_WORKSPACE_NAME"
+cat >"/opt/metasploit-lab/workspaces/$METASPLOIT_WORKSPACE_NAME/engagement-notes.md" <<EOF
+# Engagement notes
+
+- Workspace: $METASPLOIT_WORKSPACE_NAME
+- Scope: Internal lab only
+- Objective: validate the SOC detection pipeline with an offensive workstation under monitoring
+EOF
+chmod -R 750 /opt/metasploit-lab
+
+echo "Installing Metasploit Framework using the official Rapid7 installer wrapper..."
+curl -sSL https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb -o /tmp/msfinstall
+chmod 755 /tmp/msfinstall
+/tmp/msfinstall
+
+MSFCONSOLE_PATH="$(find_binary msfconsole)"
+MSFDB_PATH="$(find_binary msfdb || true)"
+
+ln -sf "$MSFCONSOLE_PATH" /usr/local/bin/msfconsole
+if [ -n "$MSFDB_PATH" ]; then
+    ln -sf "$MSFDB_PATH" /usr/local/bin/msfdb
+fi
+
+cat >/usr/local/bin/msf-lab-console <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+LOG_FILE="/var/log/metasploit-lab.log"
+DETAIL="interactive_console_started"
+if [ "$#" -gt 0 ]; then
+    DETAIL="$(printf '%s ' "$@" | cut -c1-400)"
+fi
+
+echo "$(date '+%b %e %H:%M:%S') metasploit-node metasploit-lab: action=msfconsole_launch detail=$DETAIL" >> "$LOG_FILE"
+logger -t metasploit-lab "action=msfconsole_launch detail=$DETAIL"
+
+exec /usr/local/bin/msfconsole "$@"
+EOF
+chmod 755 /usr/local/bin/msf-lab-console
+
+if [ -x /usr/local/bin/msfdb ]; then
+    echo "Initializing Metasploit database for the ubuntu user..."
+    su - ubuntu -c 'HOME=/home/ubuntu /usr/local/bin/msfdb init' || true
+fi
+
+wait_for_manager
+
+echo "Installing Wazuh agent..."
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH \
+    | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+chmod 644 /usr/share/keyrings/wazuh.gpg
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
+    >/etc/apt/sources.list.d/wazuh.list
+
+apt-get update
+if ! WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+     WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+     WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+     DEBIAN_FRONTEND=noninteractive apt-get install -y "wazuh-agent=$WAZUH_VERSION"; then
+    echo "Pinned Wazuh agent $WAZUH_VERSION was unavailable. Installing latest 4.x agent."
+    WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+    WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+    WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wazuh-agent
+fi
+
+apt-mark hold wazuh-agent
+
+if ! grep -q "metasploit-lab" /var/ossec/etc/ossec.conf; then
+    cat >>/var/ossec/etc/ossec.conf <<'EOF'
+<ossec_config>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/metasploit-lab.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/syslog</location>
+  </localfile>
+
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>900</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <directories realtime="yes" report_changes="yes">/opt/metasploit-lab</directories>
+    <directories realtime="yes" report_changes="yes">/home/ubuntu/.msf4</directories>
+  </syscheck>
+</ossec_config>
+EOF
+fi
+
+cat >/usr/local/bin/metasploit-demo-generate-events.sh <<EOF
+#!/bin/bash
+set -euo pipefail
+
+echo "\$(date '+%b %e %H:%M:%S') $WAZUH_AGENT_NAME metasploit-lab: action=module_launch detail=module=auxiliary/scanner/http/title target=10.0.1.3 outcome=simulated" >> "$METASPLOIT_LOG"
+echo "\$(date '+%b %e %H:%M:%S') $WAZUH_AGENT_NAME metasploit-lab: action=workspace_update detail=workspace=$METASPLOIT_WORKSPACE_NAME note=engagement_note_updated" >> "$METASPLOIT_LOG"
+echo "\$(date '+%b %e %H:%M:%S') $WAZUH_AGENT_NAME metasploit-lab: action=session_event detail=session=reverse_tcp handler=demo-lab outcome=simulated" >> "$METASPLOIT_LOG"
+logger -t metasploit-lab "action=module_launch detail=module=auxiliary/scanner/http/title target=10.0.1.3 outcome=simulated"
+logger -t metasploit-lab "action=session_event detail=session=reverse_tcp handler=demo-lab outcome=simulated"
+echo "engagement_note_updated=\$(date -Is)" >> "/opt/metasploit-lab/workspaces/$METASPLOIT_WORKSPACE_NAME/engagement-notes.md"
+EOF
+chmod +x /usr/local/bin/metasploit-demo-generate-events.sh
+
+echo "Starting Wazuh agent..."
+systemctl enable wazuh-agent
+systemctl restart wazuh-agent
+
+log_msf_event "framework_ready" "msfconsole_path=$MSFCONSOLE_PATH workspace=$METASPLOIT_WORKSPACE_NAME"
+/usr/local/bin/metasploit-demo-generate-events.sh || true
+
+echo "Metasploit lab endpoint setup completed successfully."
