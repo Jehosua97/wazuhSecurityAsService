@@ -1,0 +1,91 @@
+$ErrorActionPreference = "Stop"
+
+$WazuhManager = "${wazuh_manager_ip}"
+$AgentName = "${wazuh_agent_name}"
+$WazuhVersion = "${wazuh_version}"
+$DemoDir = "C:\ProgramData\WazuhDemo"
+$DemoLog = Join-Path $DemoDir "windows-demo.log"
+$DemoScript = Join-Path $DemoDir "Generate-WindowsDemoEvents.ps1"
+$EventSource = "WazuhWindowsDemo"
+
+New-Item -ItemType Directory -Path $DemoDir -Force | Out-Null
+
+function Write-SetupLog {
+    param([string]$Message)
+
+    $line = "$(Get-Date -Format s) $Message"
+    Add-Content -Path $DemoLog -Value $line
+    Write-Output $line
+}
+
+function Ensure-EventSource {
+    if (-not [System.Diagnostics.EventLog]::SourceExists($EventSource)) {
+        New-EventLog -LogName Application -Source $EventSource
+    }
+}
+
+Write-SetupLog "Starting Windows Server Wazuh endpoint setup. Manager=$WazuhManager Agent=$AgentName Version=$WazuhVersion"
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$service = Get-Service -Name "WazuhSvc" -ErrorAction SilentlyContinue
+if (-not $service) {
+    $installer = Join-Path $env:TEMP "wazuh-agent-$WazuhVersion.msi"
+    $packageUrl = "https://packages.wazuh.com/4.x/windows/wazuh-agent-$WazuhVersion.msi"
+
+    Write-SetupLog "Downloading Wazuh Windows agent from $packageUrl"
+    Invoke-WebRequest -Uri $packageUrl -OutFile $installer -UseBasicParsing
+
+    $arguments = "/i `"$installer`" /qn WAZUH_MANAGER=`"$WazuhManager`" WAZUH_AGENT_NAME=`"$AgentName`""
+    Write-SetupLog "Installing Wazuh Windows agent"
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $arguments -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "Wazuh Windows agent installer failed with exit code $($process.ExitCode)"
+    }
+} else {
+    Write-SetupLog "Wazuh Windows agent service already exists"
+}
+
+Set-Service -Name "WazuhSvc" -StartupType Automatic
+Start-Service -Name "WazuhSvc" -ErrorAction SilentlyContinue
+
+Ensure-EventSource
+
+$scriptContent = @'
+$ErrorActionPreference = "Stop"
+
+$DemoDir = "C:\ProgramData\WazuhDemo"
+$DemoLog = Join-Path $DemoDir "windows-demo.log"
+$EvidenceFile = Join-Path $DemoDir "customer-access-review.txt"
+$EventSource = "WazuhWindowsDemo"
+
+New-Item -ItemType Directory -Path $DemoDir -Force | Out-Null
+
+if (-not [System.Diagnostics.EventLog]::SourceExists($EventSource)) {
+    New-EventLog -LogName Application -Source $EventSource
+}
+
+function Emit-DemoEvent {
+    param(
+        [int]$EventId,
+        [string]$EntryType,
+        [string]$Message
+    )
+
+    $line = "$(Get-Date -Format s) windows-lab: $Message"
+    Add-Content -Path $DemoLog -Value $line
+    Write-EventLog -LogName Application -Source $EventSource -EntryType $EntryType -EventId $EventId -Message "windows-lab: $Message"
+}
+
+Emit-DemoEvent -EventId 4201 -EntryType Warning -Message "action=failed_login detail=user=legacy-admin src=10.0.1.4 outcome=simulated"
+Emit-DemoEvent -EventId 4202 -EntryType Warning -Message "action=privileged_process detail=process=powershell.exe user=Administrator outcome=simulated"
+Emit-DemoEvent -EventId 4203 -EntryType Information -Message "action=configuration_change detail=object=windows_firewall profile=domain outcome=simulated"
+
+Add-Content -Path $EvidenceFile -Value "reviewed_at=$(Get-Date -Format o) reviewer=soc-demo"
+'@
+
+Set-Content -Path $DemoScript -Value $scriptContent -Encoding ASCII
+
+powershell.exe -ExecutionPolicy Bypass -File $DemoScript
+
+Write-SetupLog "Windows Server Wazuh endpoint setup completed successfully"

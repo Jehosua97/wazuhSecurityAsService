@@ -120,6 +120,32 @@ Alertas esperadas:
 - `100190-100193`
 - `100194`
 
+### 6. `windows-server`
+
+Rol:
+
+- Windows Server 2022 monitoreado
+- eventos de Application Log para mostrar cobertura Windows
+- telemetria de login fallido, proceso privilegiado y cambio de configuracion
+
+Ruido recomendado:
+
+1. Reinicia u obten la contrasena de Administrator:
+
+```powershell
+gcloud compute reset-windows-password windows-server --project=wazuh-iac-on-gcp --zone=us-central1-a --user=Administrator
+```
+
+2. Entra por RDP y ejecuta:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File C:\ProgramData\WazuhDemo\Generate-WindowsDemoEvents.ps1
+```
+
+Alertas esperadas:
+
+- `100200-100204`
+
 ## Consultas rapidas en Wazuh
 
 Todo el SOC:
@@ -131,7 +157,7 @@ rule.groups: (soc_signal or soc_incident)
 Infraestructura nueva:
 
 ```text
-agent.name: ("edge-gateway" or "db-server" or "docker-host")
+agent.name: ("edge-gateway" or "db-server" or "docker-host" or "windows-server")
 ```
 
 Solo incidentes correlacionados:
@@ -145,7 +171,8 @@ rule.groups: soc_incident
 1. Ejecuta ruido en `edge-gateway` para abrir la narrativa de perimetro.
 2. Ejecuta ruido en `db-server` para mover la historia hacia datos sensibles.
 3. Ejecuta ruido en `docker-host` para hablar de workloads modernos.
-4. Cierra con `pyme-demo-target` o `metasploit-node` para mostrar ataque y trazabilidad.
+4. Muestra `windows-server` para validar cobertura Windows.
+5. Cierra con `pyme-demo-target` o `metasploit-node` para mostrar ataque y trazabilidad.
 
 ## Nota operativa
 

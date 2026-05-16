@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ConfigPath = Join-Path $RepoRoot "terraform\config\wazuh-manager"
+$ConfigGlob = Join-Path $ConfigPath "*"
 
 if (-not (Test-Path $ConfigPath)) {
     throw "Wazuh manager config path not found: $ConfigPath"
@@ -26,7 +27,7 @@ gcloud compute scp `
     --zone=$Zone `
     --quiet `
     --recurse `
-    "$ConfigPath\*" `
+    "$ConfigGlob" `
     "${InstanceName}:/tmp/wazuh-manager/"
 
 Write-Host "Applying configuration inside the Wazuh manager..."
@@ -36,4 +37,4 @@ gcloud compute ssh $InstanceName `
     --quiet `
     --command="sudo chmod +x /tmp/wazuh-manager/deploy.sh && sudo /tmp/wazuh-manager/deploy.sh"
 
-Write-Host "Configuration applied. Open the Wazuh dashboard and review rules 100100-100194."
+Write-Host "Configuration applied. Open the Wazuh dashboard and review rules 100100-100204."

@@ -3,58 +3,76 @@ name: Terraform Deployment
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Deploy Wazuh'
+      action:
+        description: "Terraform action"
         required: true
-        default: 'dev'
-        
-        
+        type: choice
+        default: plan
+        options:
+          - plan
+          - apply
+          - destroy
 
 jobs:
   terraform:
-    name: 'Deploy Wazuh'
+    name: Terraform ${{ inputs.action }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
+      TF_VAR_zone: ${{ secrets.ZONE }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-    - name: Authenticate to GCP
-      uses: google-github-actions/auth@v1
-      with:
-        credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
-    - name: Initialize Terraform
-      env:
-        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
-        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-        TF_VAR_zone: ${{ secrets.ZONE }}
-      run: terraform -chdir=terraform/wazuh-deploy init -input=false
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
-    - name: Verify Environment Variable
-      env:
-        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
-      run: |
-        if [ -z "$TF_VAR_gcp_credentials" ]; then
-          echo "TF_VAR_gcp_credentials is not set"
-          exit 1
-        else
-          echo "TF_VAR_gcp_credentials is set"
-        fi
+      - name: Terraform init
+        run: terraform -chdir=terraform/wazuh-deploy init -input=false
 
-    - name: Terraform Plan
-      env:
-        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
-        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-        TF_VAR_zone: ${{ secrets.ZONE }}
-      run: terraform -chdir=terraform/wazuh-deploy plan -input=false -out=tfplan
+      - name: Terraform validate
+        run: terraform -chdir=terraform/wazuh-deploy validate
 
-    - name: Terraform Apply
-      env:
-        TF_VAR_gcp_credentials: ${{ secrets.GCP_CREDENTIALS }}
-        TF_VAR_project_id: ${{ secrets.GCP_PROJECT_ID }}
-        TF_VAR_zone: ${{ secrets.ZONE }}
-      run: terraform -chdir=terraform/wazuh-deploy apply -input=false -auto-approve tfplan
+      - name: Terraform plan
+        if: inputs.action == 'plan'
+        run: terraform -chdir=terraform/wazuh-deploy plan -input=false
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform -chdir=terraform/wazuh-deploy apply -input=false -auto-approve
+
+      - name: Wait for Wazuh services
+        if: inputs.action == 'apply'
+        shell: pwsh
+        run: Start-Sleep -Seconds 360
+
+      - name: Apply Wazuh manager configuration
+        if: inputs.action == 'apply'
+        shell: pwsh
+        run: ./scripts/apply-wazuh-config.ps1 -ProjectId "${{ secrets.GCP_PROJECT_ID }}" -Zone "${{ secrets.ZONE }}"
+
+      - name: Import Wazuh dashboards
+        if: inputs.action == 'apply'
+        shell: pwsh
+        run: ./scripts/import-wazuh-dashboards.ps1 -ProjectId "${{ secrets.GCP_PROJECT_ID }}" -Zone "${{ secrets.ZONE }}" -DashboardUser "admin" -DashboardPassword "SecretPassword"
+
+      - name: Terraform output
+        if: inputs.action == 'apply'
+        run: terraform -chdir=terraform/wazuh-deploy output
+
+      - name: Terraform destroy
+        if: inputs.action == 'destroy'
+        run: terraform -chdir=terraform/wazuh-deploy destroy -input=false -auto-approve

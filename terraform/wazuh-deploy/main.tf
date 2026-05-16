@@ -48,7 +48,7 @@ resource "google_compute_instance" "wazuh_server" {
 
   tags = ["wazuh-manager", "managed-siem"]
 
-  metadata_startup_script = file("./scripts/startup.sh")
+  metadata_startup_script = replace(file("./scripts/startup.sh"), "\r\n", "\n")
 }
 
 # Agents register and send telemetry to the manager from the demo subnet and any explicitly allowed external ranges.
@@ -65,7 +65,7 @@ resource "google_compute_firewall" "wazuh_agent_firewall" {
     [google_compute_subnetwork.vpc_wazuh_subnet.ip_cidr_range],
     var.extra_agent_source_ranges
   )
-  target_tags   = ["wazuh-manager"]
+  target_tags = ["wazuh-manager"]
 }
 
 # Public dashboard access for demos. Restrict admin_source_ranges before production use.
@@ -96,6 +96,20 @@ resource "google_compute_firewall" "admin_ssh_firewall" {
   target_tags   = ["wazuh-manager", "vulnerable-target", "metasploit-endpoint", "edge-gateway", "db-server", "docker-host"]
 }
 
+# RDP access for the monitored Windows endpoint. Restrict admin_source_ranges before production use.
+resource "google_compute_firewall" "windows_rdp_firewall" {
+  name    = "windows-rdp-ingress"
+  network = google_compute_network.vpc_wazuh.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["3389"]
+  }
+
+  source_ranges = var.admin_source_ranges
+  target_tags   = ["windows-endpoint"]
+}
+
 # Monitored target used to demonstrate the free scan, FIM, SCA, web attacks and compliance evidence.
 resource "google_compute_instance" "ubuntu_endpoint" {
   name         = var.target_instance_name
@@ -123,14 +137,14 @@ resource "google_compute_instance" "ubuntu_endpoint" {
 
   tags = ["vulnerable-target", "pyme-demo"]
 
-  metadata_startup_script = templatefile("./scripts/vulnerable_target_startup.sh.tftpl", {
+  metadata_startup_script = replace(templatefile("./scripts/vulnerable_target_startup.sh.tftpl", {
     wazuh_manager_ip   = google_compute_instance.wazuh_server.network_interface[0].network_ip
     wazuh_agent_name   = var.target_instance_name
     juice_shop_port    = var.juice_shop_port
     wazuh_version      = var.wazuh_version
     demo_company_name  = var.demo_company_name
     compliance_profile = var.compliance_profile
-  })
+  }), "\r\n", "\n")
 }
 
 # Monitored Metasploit endpoint used as an offensive workstation inside the lab.
@@ -160,12 +174,12 @@ resource "google_compute_instance" "metasploit_endpoint" {
 
   tags = ["metasploit-endpoint", "red-team-lab"]
 
-  metadata_startup_script = templatefile("./scripts/metasploit_target_startup.sh.tftpl", {
-    wazuh_manager_ip         = google_compute_instance.wazuh_server.network_interface[0].network_ip
-    wazuh_agent_name         = var.metasploit_instance_name
-    wazuh_version            = var.wazuh_version
+  metadata_startup_script = replace(templatefile("./scripts/metasploit_target_startup.sh.tftpl", {
+    wazuh_manager_ip          = google_compute_instance.wazuh_server.network_interface[0].network_ip
+    wazuh_agent_name          = var.metasploit_instance_name
+    wazuh_version             = var.wazuh_version
     metasploit_workspace_name = var.metasploit_workspace_name
-  })
+  }), "\r\n", "\n")
 }
 
 # Monitored edge gateway endpoint with firewall and VPN telemetry.
@@ -195,12 +209,12 @@ resource "google_compute_instance" "edge_gateway" {
 
   tags = ["edge-gateway", "network-edge"]
 
-  metadata_startup_script = templatefile("./scripts/edge_gateway_startup.sh.tftpl", {
+  metadata_startup_script = replace(templatefile("./scripts/edge_gateway_startup.sh.tftpl", {
     wazuh_manager_ip = google_compute_instance.wazuh_server.network_interface[0].network_ip
     wazuh_agent_name = var.edge_gateway_instance_name
     wazuh_version    = var.wazuh_version
     wireguard_port   = var.wireguard_port
-  })
+  }), "\r\n", "\n")
 }
 
 # Monitored internal database endpoint.
@@ -230,12 +244,12 @@ resource "google_compute_instance" "db_server" {
 
   tags = ["db-server", "data-tier"]
 
-  metadata_startup_script = templatefile("./scripts/db_server_startup.sh.tftpl", {
+  metadata_startup_script = replace(templatefile("./scripts/db_server_startup.sh.tftpl", {
     wazuh_manager_ip = google_compute_instance.wazuh_server.network_interface[0].network_ip
     wazuh_agent_name = var.db_server_instance_name
     wazuh_version    = var.wazuh_version
     db_name          = var.db_name
-  })
+  }), "\r\n", "\n")
 }
 
 # Monitored docker host endpoint with sample business containers.
@@ -265,12 +279,48 @@ resource "google_compute_instance" "docker_host" {
 
   tags = ["docker-host", "container-platform"]
 
-  metadata_startup_script = templatefile("./scripts/docker_host_startup.sh.tftpl", {
+  metadata_startup_script = replace(templatefile("./scripts/docker_host_startup.sh.tftpl", {
     wazuh_manager_ip = google_compute_instance.wazuh_server.network_interface[0].network_ip
     wazuh_agent_name = var.docker_host_instance_name
     wazuh_version    = var.wazuh_version
     docker_demo_port = var.docker_demo_port
-  })
+  }), "\r\n", "\n")
+}
+
+# Monitored Windows Server endpoint with Wazuh agent and controlled event telemetry.
+resource "google_compute_instance" "windows_server" {
+  name         = var.windows_instance_name
+  machine_type = var.windows_machine_type
+  zone         = var.zone
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "windows-server"
+  }
+
+  boot_disk {
+    initialize_params {
+      image = var.windows_image
+      size  = var.windows_boot_disk_size
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.vpc_wazuh.self_link
+    subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
+    access_config {}
+  }
+
+  tags = ["windows-endpoint", "managed-windows"]
+
+  metadata = {
+    "windows-startup-script-ps1" = templatefile("./scripts/windows_server_startup.ps1.tftpl", {
+      wazuh_manager_ip = google_compute_instance.wazuh_server.network_interface[0].network_ip
+      wazuh_agent_name = var.windows_instance_name
+      wazuh_version    = var.wazuh_version
+    })
+  }
 }
 
 # Public access to the landing page and Juice Shop lab for sales demos.

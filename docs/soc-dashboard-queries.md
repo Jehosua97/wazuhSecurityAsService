@@ -19,6 +19,7 @@ Las consultas usan los grupos agregados en `local_rules.xml`, especialmente:
 - `edge_gateway`
 - `database_endpoint`
 - `docker_host`
+- `windows_endpoint`
 - `infrastructure_incident`
 
 ## Listas operativas
@@ -188,6 +189,17 @@ Uso:
 - ver correlacion de eventos de gateway, base de datos y contenedores
 - operar el MVP como una cola SOC de infraestructura
 
+### 16. Actividad del Windows Server
+
+```text
+agent.name: "windows-server" and rule.groups: windows_endpoint
+```
+
+Uso:
+
+- mostrar telemetria de Application Log en Windows Server
+- validar que los endpoints Windows tambien reportan al SOC
+
 ## Listas ejecutivas
 
 ### Riesgo alto visible al cliente
@@ -238,5 +250,5 @@ agent.name: "pyme-demo-target" and rule.id: (100141 or 100143 or 100144 or 10015
 Para mostrar la nueva infraestructura monitoreada:
 
 ```text
-agent.name: ("edge-gateway" or "db-server" or "docker-host") and rule.id: (100170 or 100171 or 100172 or 100173 or 100180 or 100181 or 100182 or 100183 or 100190 or 100191 or 100192 or 100193 or 100194)
+agent.name: ("edge-gateway" or "db-server" or "docker-host" or "windows-server") and rule.id: (100170 or 100171 or 100172 or 100173 or 100180 or 100181 or 100182 or 100183 or 100190 or 100191 or 100192 or 100193 or 100194 or 100200 or 100201 or 100202 or 100203 or 100204)
 ```

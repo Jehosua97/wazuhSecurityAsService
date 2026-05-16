@@ -24,16 +24,18 @@ Si quieres posicionarlo como servicio SOC para clientes, revisa también:
 - Un endpoint `edge-gateway` con nftables, WireGuard y agente Wazuh.
 - Un endpoint `db-server` con MariaDB y agente Wazuh.
 - Un endpoint `docker-host` con Docker, portal demo y agente Wazuh.
+- Un endpoint `windows-server` con Windows Server 2022 y agente Wazuh.
 - Un panel web en el target con botones para lanzar pruebas controladas contra Juice Shop.
 - Artefactos controlados de cumplimiento en `/opt/pyme-compliance`.
 - Un laboratorio vulnerable con Juice Shop en el puerto `3000`.
-- Reglas locales Wazuh `100100-100194` para threat intelligence, ataques web, fuerza bruta SSH, FIM, correlación SOC, actividad del endpoint Metasploit, red/firewall/VPN, base de datos, docker host y acciones del panel.
+- Reglas locales Wazuh `100100-100204` para threat intelligence, ataques web, fuerza bruta SSH, FIM, correlación SOC, actividad del endpoint Metasploit, red/firewall/VPN, base de datos, docker host, Windows Server y acciones del panel.
 - Integración con lista AlienVault convertida a CDB para bloqueo activo.
 - Firewall más segmentado: dashboard/SSH por `admin_source_ranges`, target demo por `target_source_ranges`, y puertos de agente desde la subnet privada mas `extra_agent_source_ranges` cuando necesites enrolar endpoints externos.
 
 ## Requisitos
 
 - Proyecto GCP con billing habilitado.
+  Nota: GCP bloquea instancias Windows Server en proyectos Free Trial; para crear `windows-server`, la cuenta debe tener billing activo.
 - APIs habilitadas:
   - Compute Engine API
   - Cloud Resource Manager API
@@ -41,8 +43,39 @@ Si quieres posicionarlo como servicio SOC para clientes, revisa también:
 - Terraform instalado.
 - Google Cloud CLI instalado.
 - Permisos para crear Compute Engine, VPC, firewall rules y discos.
+- Permisos de Cloud Storage para usar el backend remoto de Terraform state.
 
 En esta máquina ya se detectaron `terraform` y `gcloud`, pero si corres desde otra máquina instala ambos primero.
+
+## Trabajo en equipo
+
+El estado de Terraform se guarda en un backend remoto de GCS:
+
+```text
+gs://wazuh-security-service-tfstate-wazuh-iac-on-gcp/terraform/wazuh-deploy
+```
+
+Esto permite que cualquier integrante con permisos de GCP y acceso al repo pueda ejecutar `plan`, `apply` o `destroy` sin depender del `terraform.tfstate` local de otra persona.
+
+Si el bucket no existe en un proyecto nuevo, crealo una sola vez:
+
+```powershell
+gcloud storage buckets create gs://wazuh-security-service-tfstate-wazuh-iac-on-gcp --project=wazuh-iac-on-gcp --location=us-central1 --uniform-bucket-level-access
+```
+
+En GitHub Actions configura estos secrets del repo:
+
+```text
+GCP_CREDENTIALS
+GCP_PROJECT_ID
+ZONE
+```
+
+Luego ve a **Actions > Terraform Deployment > Run workflow** y elige:
+
+- `plan`: revisar cambios.
+- `apply`: levantar o actualizar infraestructura, aplicar configuración Wazuh e importar dashboards.
+- `destroy`: destruir la infraestructura administrada por Terraform.
 
 ## Configuracion rapida
 
@@ -253,6 +286,7 @@ Tambien se despliegan endpoints adicionales para ampliar el alcance del laborato
 - `edge-gateway`: firewall/VPN con WireGuard y nftables.
 - `db-server`: base de datos MariaDB con datos demo y eventos de acceso sensible.
 - `docker-host`: host de contenedores con portal web demo.
+- `windows-server`: Windows Server 2022 con agente Wazuh y eventos de Application Log.
 
 Para generar telemetria controlada:
 
@@ -262,12 +296,25 @@ gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --c
 gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
 ```
 
+Para Windows, obten primero o reinicia la contrasena de Administrator:
+
+```powershell
+gcloud compute reset-windows-password windows-server --project=wazuh-iac-on-gcp --zone=us-central1-a --user=Administrator
+```
+
+Luego entra por RDP y ejecuta:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File C:\ProgramData\WazuhDemo\Generate-WindowsDemoEvents.ps1
+```
+
 Consultas recomendadas:
 
 ```text
 agent.name: "edge-gateway" and rule.groups: edge_gateway
 agent.name: "db-server" and rule.groups: database_endpoint
 agent.name: "docker-host" and rule.groups: docker_host
+agent.name: "windows-server" and rule.groups: windows_endpoint
 rule.groups: infrastructure_incident
 ```
 
@@ -287,7 +334,7 @@ Ese script genera:
 
 En Wazuh revisa:
 
-- Alertas de reglas `100100-100194`.
+- Alertas de reglas `100100-100204`.
 - File Integrity Monitoring sobre `/opt/pyme-compliance`.
 - SCA y vulnerabilidades del endpoint.
 - Telemetría web de Apache y Juice Shop.

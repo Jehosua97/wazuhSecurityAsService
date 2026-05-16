@@ -111,6 +111,26 @@ variable "docker_demo_port" {
   default     = 8081
 }
 
+variable "windows_instance_name" {
+  description = "Name of the monitored Windows Server endpoint"
+  default     = "windows-server"
+}
+
+variable "windows_machine_type" {
+  description = "Machine type for the monitored Windows Server endpoint"
+  default     = "e2-standard-2"
+}
+
+variable "windows_boot_disk_size" {
+  description = "Boot disk size in GB for the monitored Windows Server endpoint"
+  default     = 50
+}
+
+variable "windows_image" {
+  description = "GCP image family used by the monitored Windows Server endpoint"
+  default     = "projects/windows-cloud/global/images/family/windows-2022"
+}
+
 variable "demo_company_name" {
   description = "Business-facing name used in the target landing page and demo artifacts"
   default     = "PYME Demo Mexico"

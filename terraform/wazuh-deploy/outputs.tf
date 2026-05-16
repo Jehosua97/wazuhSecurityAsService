@@ -118,6 +118,26 @@ output "docker_demo_event_command" {
   value       = "gcloud compute ssh ${var.docker_host_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/docker-demo-generate-events.sh\""
 }
 
+output "windows_server_public_ip" {
+  description = "Public IP of the monitored Windows Server endpoint"
+  value       = google_compute_instance.windows_server.network_interface[0].access_config[0].nat_ip
+}
+
+output "windows_server_agent_name" {
+  description = "Agent name expected in the Wazuh dashboard for the Windows Server endpoint"
+  value       = var.windows_instance_name
+}
+
+output "windows_demo_event_command" {
+  description = "PowerShell command to generate controlled Windows endpoint telemetry over RDP or a Windows shell"
+  value       = "powershell.exe -ExecutionPolicy Bypass -File C:\\ProgramData\\WazuhDemo\\Generate-WindowsDemoEvents.ps1"
+}
+
+output "windows_rdp_password_command" {
+  description = "Command to set or reset the Windows Administrator password for RDP access"
+  value       = "gcloud compute reset-windows-password ${var.windows_instance_name} --project=${var.project_id} --zone=${var.zone} --user=Administrator"
+}
+
 output "wazuh_target_agent_name" {
   description = "Agent name expected in the Wazuh dashboard"
   value       = var.target_instance_name

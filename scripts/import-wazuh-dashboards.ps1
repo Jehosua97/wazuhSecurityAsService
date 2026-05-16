@@ -239,6 +239,12 @@ $savedObjects = @(
         -Description "Actividad del host de contenedores y drift operativo." `
         -Query 'agent.name: "docker-host" and rule.groups: docker_host'),
 
+    (New-WazuhSearchObject `
+        -Id "soc-ops-windows-server" `
+        -Title "SOC Operativo - Actividad windows-server" `
+        -Description "Actividad del endpoint Windows Server monitoreado." `
+        -Query 'agent.name: "windows-server" and rule.groups: windows_endpoint'),
+
     (New-WazuhDashboardObject `
         -Id "soc-ejecutivo-dashboard" `
         -Title "SOC Ejecutivo - PYME Mexico" `
@@ -261,7 +267,8 @@ $savedObjects = @(
             [ordered]@{ searchId = "soc-ops-metasploit"; x = 0;  y = 24; w = 16; h = 12 },
             [ordered]@{ searchId = "soc-ops-edge-gateway"; x = 16; y = 24; w = 16; h = 12 },
             [ordered]@{ searchId = "soc-ops-db-server"; x = 32; y = 24; w = 16; h = 12 },
-            [ordered]@{ searchId = "soc-ops-docker-host"; x = 0;  y = 36; w = 48; h = 12 }
+            [ordered]@{ searchId = "soc-ops-docker-host"; x = 0;  y = 36; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-ops-windows-server"; x = 24; y = 36; w = 24; h = 12 }
         ))
 )
 
