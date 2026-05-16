@@ -2,6 +2,20 @@
 
 Este flujo prepara un endpoint Linux con interfaz grafica para monitorear una carpeta sensible visible desde Documentos, detectar comportamiento tipo ransomware, intentos fallidos contra el usuario `esquivel` y escaneos de puertos.
 
+En el despliegue GCP actual, Terraform crea esta maquina:
+
+```text
+linux-ui-workstation
+```
+
+El escritorio usa XFCE + XRDP. La carpeta sensible real es `/Confidencial` y se ve como acceso directo en:
+
+```text
+/home/analista/Documents/Confidencial
+/home/analista/Documentos/Confidencial
+/home/analista/Desktop/Confidencial
+```
+
 ## Rutas configuradas
 
 Manager:
@@ -37,6 +51,34 @@ Desde la raiz del repo:
 Esto copia `local_rules.xml`, `local_decoder.xml` y reinicia el manager.
 
 ## Preparar el Agente Linux UI
+
+### Opcion A: VM GCP creada por Terraform
+
+Si estas usando la infraestructura de este repo, no tienes que instalarlo manualmente. Terraform ya crea `linux-ui-workstation`, instala XRDP, crea el usuario `analista`, configura Wazuh Agent y prepara `/Confidencial`.
+
+Para obtener la IP y comandos:
+
+```powershell
+terraform -chdir="terraform/wazuh-deploy" output linux_ui_public_ip
+terraform -chdir="terraform/wazuh-deploy" output linux_ui_private_ip
+terraform -chdir="terraform/wazuh-deploy" output linux_ui_rdp_credentials_command
+```
+
+Para ver credenciales RDP:
+
+```powershell
+gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo cat /root/linux-ui-rdp-credentials.txt"
+```
+
+Luego abre RDP contra la IP publica y entra con el usuario `analista`.
+
+Si tu red bloquea salida directa al puerto `3389`, crea un tunel local y conecta RDP a `localhost:13389`:
+
+```powershell
+gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --ssh-flag="-L 13389:localhost:3389" --ssh-flag="-N"
+```
+
+### Opcion B: endpoint externo/manual
 
 Primero asegurate de que el agente Wazuh ya este instalado y enrolado al manager. Luego, en el endpoint Linux UI, desde una copia del repo:
 
@@ -130,6 +172,12 @@ Desde otra maquina, contra la IP del agente Linux UI:
 
 ```bash
 sudo nmap -Pn -sS -T4 -p1-1024 <AGENT_IP>
+```
+
+Desde `metasploit-node` en este laboratorio:
+
+```powershell
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo bash -lc 'command -v nmap >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nmap); nmap -Pn -sS -T4 -p1-1024 10.0.1.19'"
 ```
 
 Si no tienes permisos para SYN scan:

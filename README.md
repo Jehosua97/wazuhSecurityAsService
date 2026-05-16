@@ -25,6 +25,7 @@ Si quieres posicionarlo como servicio SOC para clientes, revisa también:
 - Un endpoint `edge-gateway` con nftables, WireGuard y agente Wazuh.
 - Un endpoint `db-server` con MariaDB y agente Wazuh.
 - Un endpoint `docker-host` con Docker, portal demo y agente Wazuh.
+- Un endpoint `linux-ui-workstation` con XFCE/XRDP, agente Wazuh y carpeta sensible `/Confidencial` visible desde Documentos.
 - Un endpoint `windows-server` con Windows Server 2022 y agente Wazuh.
 - Un panel web en el target con botones para lanzar pruebas controladas contra Juice Shop.
 - Artefactos controlados de cumplimiento en `/opt/pyme-compliance`.
@@ -287,6 +288,7 @@ Tambien se despliegan endpoints adicionales para ampliar el alcance del laborato
 - `edge-gateway`: firewall/VPN con WireGuard y nftables.
 - `db-server`: base de datos MariaDB con datos demo y eventos de acceso sensible.
 - `docker-host`: host de contenedores con portal web demo.
+- `linux-ui-workstation`: Linux con interfaz grafica, XRDP y carpeta sensible `/Confidencial`.
 - `windows-server`: Windows Server 2022 con agente Wazuh y eventos de Application Log.
 
 Para generar telemetria controlada:
@@ -295,7 +297,18 @@ Para generar telemetria controlada:
 gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/gateway-demo-generate-events.sh"
 gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/db-demo-generate-events.sh"
 gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
+gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/simulate-confidential-ransomware-burst.sh"
+gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/linux-ui-demo-auth-failure.sh"
+gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo bash -lc 'command -v nmap >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nmap); nmap -Pn -sS -T4 -p1-1024 10.0.1.19'"
 ```
+
+Para entrar por RDP a la estacion Linux UI, obten las credenciales generadas:
+
+```powershell
+gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo cat /root/linux-ui-rdp-credentials.txt"
+```
+
+Luego abre RDP a la IP publica de `linux-ui-workstation` y usa el usuario `analista`.
 
 Para Windows, obten primero o reinicia la contrasena de Administrator:
 
@@ -315,6 +328,7 @@ Consultas recomendadas:
 agent.name: "edge-gateway" and rule.groups: edge_gateway
 agent.name: "db-server" and rule.groups: database_endpoint
 agent.name: "docker-host" and rule.groups: docker_host
+agent.name: "linux-ui-workstation" and rule.id: (100010 or 100015 or 100020 or 100030)
 agent.name: "windows-server" and rule.groups: windows_endpoint
 rule.groups: infrastructure_incident
 ```

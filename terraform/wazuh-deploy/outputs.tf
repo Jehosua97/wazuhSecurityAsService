@@ -118,9 +118,44 @@ output "docker_demo_event_command" {
   value       = "gcloud compute ssh ${var.docker_host_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/docker-demo-generate-events.sh\""
 }
 
+output "linux_ui_public_ip" {
+  description = "Public IP of the monitored Linux UI endpoint"
+  value       = google_compute_instance.linux_ui_workstation.network_interface[0].access_config[0].nat_ip
+}
+
+output "linux_ui_private_ip" {
+  description = "Private IP of the monitored Linux UI endpoint"
+  value       = google_compute_instance.linux_ui_workstation.network_interface[0].network_ip
+}
+
+output "linux_ui_agent_name" {
+  description = "Agent name expected in the Wazuh dashboard for the Linux UI endpoint"
+  value       = var.linux_ui_instance_name
+}
+
+output "linux_ui_rdp_credentials_command" {
+  description = "Command to read the generated XRDP credentials for the Linux UI endpoint"
+  value       = "gcloud compute ssh ${var.linux_ui_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo cat /root/linux-ui-rdp-credentials.txt\""
+}
+
+output "linux_ui_ransomware_demo_command" {
+  description = "Command to generate controlled ransomware-like FIM burst telemetry on the Linux UI endpoint"
+  value       = "gcloud compute ssh ${var.linux_ui_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/simulate-confidential-ransomware-burst.sh\""
+}
+
+output "linux_ui_auth_failure_demo_command" {
+  description = "Command to generate controlled failed authentication telemetry for user esquivel"
+  value       = "gcloud compute ssh ${var.linux_ui_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/linux-ui-demo-auth-failure.sh\""
+}
+
+output "linux_ui_nmap_scan_from_metasploit_command" {
+  description = "Command to run a controlled Nmap scan from the Metasploit endpoint against the Linux UI endpoint"
+  value       = "gcloud compute ssh ${var.metasploit_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo bash -lc 'command -v nmap >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nmap); nmap -Pn -sS -T4 -p1-1024 ${google_compute_instance.linux_ui_workstation.network_interface[0].network_ip}'\""
+}
+
 output "windows_server_public_ip" {
   description = "Public IP of the monitored Windows Server endpoint"
-  value       = google_compute_instance.windows_server.network_interface[0].access_config[0].nat_ip
+  value       = var.enable_windows_server ? google_compute_instance.windows_server[0].network_interface[0].access_config[0].nat_ip : null
 }
 
 output "windows_server_agent_name" {

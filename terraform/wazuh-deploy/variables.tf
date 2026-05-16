@@ -111,6 +111,32 @@ variable "docker_demo_port" {
   default     = 8081
 }
 
+variable "linux_ui_instance_name" {
+  description = "Name of the monitored Linux desktop endpoint"
+  default     = "linux-ui-workstation"
+}
+
+variable "linux_ui_machine_type" {
+  description = "Machine type for the monitored Linux desktop endpoint"
+  default     = "e2-standard-2"
+}
+
+variable "linux_ui_boot_disk_size" {
+  description = "Boot disk size in GB for the monitored Linux desktop endpoint"
+  default     = 50
+}
+
+variable "linux_ui_user" {
+  description = "Local desktop/RDP user created on the Linux UI endpoint"
+  default     = "analista"
+}
+
+variable "enable_windows_server" {
+  description = "Create the Windows Server endpoint. Keep false on GCP Free Trial projects because Windows VMs are blocked there."
+  type        = bool
+  default     = false
+}
+
 variable "windows_instance_name" {
   description = "Name of the monitored Windows Server endpoint"
   default     = "windows-server"

@@ -93,7 +93,7 @@ resource "google_compute_firewall" "admin_ssh_firewall" {
   }
 
   source_ranges = var.admin_source_ranges
-  target_tags   = ["wazuh-manager", "vulnerable-target", "metasploit-endpoint", "edge-gateway", "db-server", "docker-host"]
+  target_tags   = ["wazuh-manager", "vulnerable-target", "metasploit-endpoint", "edge-gateway", "db-server", "docker-host", "linux-ui-endpoint"]
 }
 
 # RDP access for the monitored Windows endpoint. Restrict admin_source_ranges before production use.
@@ -108,6 +108,37 @@ resource "google_compute_firewall" "windows_rdp_firewall" {
 
   source_ranges = var.admin_source_ranges
   target_tags   = ["windows-endpoint"]
+}
+
+# RDP access for the monitored Linux UI endpoint. Restrict admin_source_ranges before production use.
+resource "google_compute_firewall" "linux_ui_rdp_firewall" {
+  name    = "linux-ui-rdp-ingress"
+  network = google_compute_network.vpc_wazuh.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["3389"]
+  }
+
+  source_ranges = var.admin_source_ranges
+  target_tags   = ["linux-ui-endpoint"]
+}
+
+# Allow scan traffic to reach the Linux UI endpoint so nftables can log and drop it locally for Wazuh.
+resource "google_compute_firewall" "linux_ui_scan_test_firewall" {
+  name    = "linux-ui-scan-test-ingress"
+  network = google_compute_network.vpc_wazuh.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["1-1024"]
+  }
+
+  source_ranges = concat(
+    [google_compute_subnetwork.vpc_wazuh_subnet.ip_cidr_range],
+    var.admin_source_ranges
+  )
+  target_tags = ["linux-ui-endpoint"]
 }
 
 # Monitored target used to demonstrate the free scan, FIM, SCA, web attacks and compliance evidence.
@@ -287,8 +318,45 @@ resource "google_compute_instance" "docker_host" {
   }), "\r\n", "\n")
 }
 
+# Monitored Linux desktop endpoint for DLP/FIM, ransomware heuristics, auth failures and port-scan demos.
+resource "google_compute_instance" "linux_ui_workstation" {
+  name         = var.linux_ui_instance_name
+  machine_type = var.linux_ui_machine_type
+  zone         = var.zone
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "linux-ui-workstation"
+  }
+
+  boot_disk {
+    initialize_params {
+      image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+      size  = var.linux_ui_boot_disk_size
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.vpc_wazuh.self_link
+    subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
+    access_config {}
+  }
+
+  tags = ["linux-ui-endpoint", "desktop-endpoint", "sensitive-data-lab"]
+
+  metadata_startup_script = replace(templatefile("./scripts/linux_ui_startup.sh.tftpl", {
+    wazuh_manager_ip = google_compute_instance.wazuh_server.network_interface[0].network_ip
+    wazuh_agent_name = var.linux_ui_instance_name
+    wazuh_version    = var.wazuh_version
+    linux_ui_user    = var.linux_ui_user
+  }), "\r\n", "\n")
+}
+
 # Monitored Windows Server endpoint with Wazuh agent and controlled event telemetry.
 resource "google_compute_instance" "windows_server" {
+  count = var.enable_windows_server ? 1 : 0
+
   name         = var.windows_instance_name
   machine_type = var.windows_machine_type
   zone         = var.zone

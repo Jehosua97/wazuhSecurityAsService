@@ -1,0 +1,222 @@
+#!/bin/bash
+
+set -euo pipefail
+
+LOG_FILE="/var/log/startup.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec >>"$LOG_FILE" 2>&1
+
+handle_error() {
+    echo "Error on line $1"
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+WAZUH_MANAGER_IP="${wazuh_manager_ip}"
+WAZUH_AGENT_NAME="${wazuh_agent_name}"
+WAZUH_VERSION="${wazuh_version}"
+LAB_USER="${linux_ui_user}"
+SENSITIVE_DIR="/Confidencial"
+PASSWORD_FILE="/root/linux-ui-rdp-credentials.txt"
+
+echo "Starting Linux UI endpoint setup..."
+echo "Using Wazuh manager at $WAZUH_MANAGER_IP"
+
+wait_for_manager() {
+    for attempt in $(seq 1 90); do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$WAZUH_MANAGER_IP/1515" 2>/dev/null; then
+            echo "Wazuh manager authd is reachable."
+            return 0
+        fi
+
+        echo "Waiting for Wazuh manager authd on $WAZUH_MANAGER_IP:1515 (attempt $attempt/90)..."
+        sleep 10
+    done
+
+    echo "Timed out waiting for Wazuh manager authd."
+    return 1
+}
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "Installing desktop, XRDP, firewall and agent prerequisites..."
+apt-get update
+apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    dbus-x11 \
+    gnupg \
+    nftables \
+    openssl \
+    rsyslog \
+    unzip \
+    xorgxrdp \
+    xrdp \
+    xfce4 \
+    xfce4-goodies
+
+echo "Creating demo desktop user..."
+if ! id "$LAB_USER" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$LAB_USER"
+fi
+
+LAB_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-16)Aa1!"
+echo "$LAB_USER:$LAB_PASSWORD" | chpasswd
+usermod -aG sudo,adm "$LAB_USER"
+
+cat >"$PASSWORD_FILE" <<EOF
+linux_ui_host=$WAZUH_AGENT_NAME
+rdp_user=$LAB_USER
+rdp_password=$LAB_PASSWORD
+rdp_port=3389
+sensitive_folder=$SENSITIVE_DIR
+documents_shortcut=/home/$LAB_USER/Documents/Confidencial
+EOF
+chmod 600 "$PASSWORD_FILE"
+
+echo "Configuring XFCE session for XRDP..."
+echo "xfce4-session" >"/home/$LAB_USER/.xsession"
+chown "$LAB_USER:$LAB_USER" "/home/$LAB_USER/.xsession"
+adduser xrdp ssl-cert || true
+systemctl enable xrdp
+systemctl restart xrdp
+
+echo "Preparing sensitive folder and desktop shortcuts..."
+mkdir -p "$SENSITIVE_DIR"
+chown root:"$LAB_USER" "$SENSITIVE_DIR"
+chmod 0770 "$SENSITIVE_DIR"
+
+mkdir -p "/home/$LAB_USER/Documents" "/home/$LAB_USER/Documentos" "/home/$LAB_USER/Desktop"
+ln -sfn "$SENSITIVE_DIR" "/home/$LAB_USER/Documents/Confidencial"
+ln -sfn "$SENSITIVE_DIR" "/home/$LAB_USER/Documentos/Confidencial"
+ln -sfn "$SENSITIVE_DIR" "/home/$LAB_USER/Desktop/Confidencial"
+chown -R "$LAB_USER:$LAB_USER" "/home/$LAB_USER/Documents" "/home/$LAB_USER/Documentos" "/home/$LAB_USER/Desktop"
+chown -h "$LAB_USER:$LAB_USER" "/home/$LAB_USER/Documents/Confidencial" "/home/$LAB_USER/Documentos/Confidencial" "/home/$LAB_USER/Desktop/Confidencial"
+
+cat >"$SENSITIVE_DIR/README-demo.txt" <<'EOF'
+Carpeta sensible de demostracion.
+Los cambios, creaciones y borrados aqui deben generar la regla 100015.
+Una rafaga de cambios debe generar la regla 100010.
+EOF
+chown root:"$LAB_USER" "$SENSITIVE_DIR/README-demo.txt"
+chmod 0660 "$SENSITIVE_DIR/README-demo.txt"
+
+echo "Configuring nftables drop logging for port-scan telemetry..."
+systemctl enable --now nftables
+nft delete table inet wazuh_scan_lab >/dev/null 2>&1 || true
+nft add table inet wazuh_scan_lab
+nft 'add chain inet wazuh_scan_lab input { type filter hook input priority 0; policy accept; }'
+nft add rule inet wazuh_scan_lab input ct state established,related accept
+nft add rule inet wazuh_scan_lab input iif lo accept
+nft add rule inet wazuh_scan_lab input tcp dport 22 accept
+nft add rule inet wazuh_scan_lab input tcp dport 3389 accept
+nft 'add rule inet wazuh_scan_lab input tcp dport { 1-21, 23-1024 } tcp flags & (fin|syn|rst|ack) == syn log prefix "wazuh-fw-drop: " level info drop'
+nft list ruleset >/etc/nftables.conf
+
+touch /var/log/kern.log /var/log/auth.log
+chmod 0640 /var/log/kern.log /var/log/auth.log || true
+systemctl enable rsyslog
+systemctl restart rsyslog
+
+wait_for_manager
+
+echo "Installing Wazuh agent..."
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH \
+    | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+chmod 644 /usr/share/keyrings/wazuh.gpg
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
+    >/etc/apt/sources.list.d/wazuh.list
+
+apt-get update
+if ! WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+     WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+     WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+     DEBIAN_FRONTEND=noninteractive apt-get install -y "wazuh-agent=$WAZUH_VERSION"; then
+    echo "Pinned Wazuh agent $WAZUH_VERSION was unavailable. Installing latest 4.x agent."
+    WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+    WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+    WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wazuh-agent
+fi
+
+apt-mark hold wazuh-agent
+
+if ! grep -q "WAZUH_LINUX_UI_SENSITIVE_LAB_START" /var/ossec/etc/ossec.conf; then
+    cat >>/var/ossec/etc/ossec.conf <<EOF
+<!-- WAZUH_LINUX_UI_SENSITIVE_LAB_START -->
+<ossec_config>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/kern.log</location>
+  </localfile>
+
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>300</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <auto_ignore frequency="10" timeframe="3600">no</auto_ignore>
+    <directories realtime="yes" report_changes="yes" check_all="yes">$SENSITIVE_DIR</directories>
+  </syscheck>
+</ossec_config>
+<!-- WAZUH_LINUX_UI_SENSITIVE_LAB_END -->
+EOF
+fi
+
+cat >/usr/local/bin/simulate-confidential-ransomware-burst.sh <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+TARGET_DIR="$${1:-/Confidencial}"
+RUN_ID="$(date +%Y%m%d%H%M%S)"
+
+mkdir -p "$TARGET_DIR"
+
+echo "Generating a controlled ransomware-like FIM burst in $TARGET_DIR"
+echo "Rule 100010 expects at least 4 FIM events in 10 seconds."
+
+for i in $(seq 1 6); do
+    original="$TARGET_DIR/demo-sensitive-$RUN_ID-$i.txt"
+    encrypted="$original.locked"
+
+    printf 'customer_id=%03d\nstatus=confidential\n' "$i" > "$original"
+    printf 'encrypted_at=%s\noriginal=%s\n' "$(date -Is)" "$original" > "$encrypted"
+    rm -f "$original"
+
+    sleep 0.5
+done
+
+find "$TARGET_DIR" -maxdepth 1 -type f -name '*.locked' -print
+echo "Burst completed. Review Wazuh alerts for rules 100015 and 100010."
+EOF
+chmod +x /usr/local/bin/simulate-confidential-ransomware-burst.sh
+
+cat >/usr/local/bin/linux-ui-demo-auth-failure.sh <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+logger -p authpriv.warning -t sshd "Failed password for esquivel from 203.0.113.50 port 53022 ssh2"
+logger -p authpriv.warning -t su "FAILED su for esquivel by $(whoami)"
+echo "Generated controlled auth failures for user esquivel. Review rule 100020."
+EOF
+chmod +x /usr/local/bin/linux-ui-demo-auth-failure.sh
+
+echo "Starting Wazuh agent..."
+systemctl enable wazuh-agent
+systemctl restart wazuh-agent
+
+echo "Generating initial controlled DLP/FIM event..."
+echo "created_at=$(date -Is)" >>"$SENSITIVE_DIR/initial-access-review.txt"
+chown root:"$LAB_USER" "$SENSITIVE_DIR/initial-access-review.txt"
+chmod 0660 "$SENSITIVE_DIR/initial-access-review.txt"
+
+echo "Linux UI endpoint setup completed successfully."
