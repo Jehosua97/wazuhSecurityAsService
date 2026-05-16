@@ -37,4 +37,4 @@ gcloud compute ssh $InstanceName `
     --quiet `
     --command="sudo chmod +x /tmp/wazuh-manager/deploy.sh && sudo /tmp/wazuh-manager/deploy.sh"
 
-Write-Host "Configuration applied. Open the Wazuh dashboard and review rules 100100-100204."
+Write-Host "Configuration applied. Open the Wazuh dashboard and review rules 100010, 100015, 100020, 100030 and 100100-100204."

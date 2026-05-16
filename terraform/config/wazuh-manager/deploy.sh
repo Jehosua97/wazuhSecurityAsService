@@ -21,12 +21,17 @@ if [ ! -d "$WAZUH_ETC_DIR" ]; then
 fi
 
 echo "Applying Wazuh PYME Mexico manager configuration to $WAZUH_ETC_DIR"
-sudo mkdir -p "$WAZUH_ETC_DIR/rules" "$WAZUH_ETC_DIR/lists"
+sudo mkdir -p "$WAZUH_ETC_DIR/rules" "$WAZUH_ETC_DIR/decoders" "$WAZUH_ETC_DIR/lists"
 sudo install -m 0640 /tmp/wazuh-manager/etc/ossec.conf "$WAZUH_ETC_DIR/ossec.conf"
 sudo install -m 0640 /tmp/wazuh-manager/etc/rules/local_rules.xml "$WAZUH_ETC_DIR/rules/local_rules.xml"
+if [ -d /tmp/wazuh-manager/etc/decoders ]; then
+    sudo find /tmp/wazuh-manager/etc/decoders -maxdepth 1 -type f -name '*.xml' \
+        -exec install -m 0640 {} "$WAZUH_ETC_DIR/decoders/" \;
+fi
 sudo install -m 0640 /tmp/wazuh-manager/etc/lists/alienvault_reputation.ipset "$WAZUH_ETC_DIR/lists/alienvault_reputation.ipset"
 sudo sed -i 's/\r$//' "$WAZUH_ETC_DIR/ossec.conf"
 sudo sed -i 's/\r$//' "$WAZUH_ETC_DIR/rules/local_rules.xml"
+sudo find "$WAZUH_ETC_DIR/decoders" -maxdepth 1 -type f -name '*.xml' -exec sed -i 's/\r$//' {} \;
 sudo sed -i 's/\r$//' "$WAZUH_ETC_DIR/lists/alienvault_reputation.ipset"
 
 sudo docker exec -i $CONTAINER_ID mkdir -p /opt/tools
@@ -39,6 +44,7 @@ sudo docker exec -i $CONTAINER_ID /var/ossec/framework/python/bin/python3 /opt/t
 # Fix permissions
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/ossec.conf
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/rules/local_rules.xml
+sudo docker exec -i $CONTAINER_ID chown -R wazuh:wazuh /var/ossec/etc/decoders
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/lists/alienvault_reputation.ipset
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/lists/blacklist-alienvault
 

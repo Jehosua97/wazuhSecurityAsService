@@ -252,3 +252,15 @@ Para mostrar la nueva infraestructura monitoreada:
 ```text
 agent.name: ("edge-gateway" or "db-server" or "docker-host" or "windows-server") and rule.id: (100170 or 100171 or 100172 or 100173 or 100180 or 100181 or 100182 or 100183 or 100190 or 100191 or 100192 or 100193 or 100194 or 100200 or 100201 or 100202 or 100203 or 100204)
 ```
+
+Para mostrar el endpoint Linux UI con carpeta sensible:
+
+```text
+rule.id: (100010 or 100015 or 100020 or 100030) or rule.groups: linux_ui_endpoint
+```
+
+Para mostrar MITRE ATT&CK:
+
+```text
+rule.mitre.id: (T1486 or T1595)
+```

@@ -245,6 +245,12 @@ $savedObjects = @(
         -Description "Actividad del endpoint Windows Server monitoreado." `
         -Query 'agent.name: "windows-server" and rule.groups: windows_endpoint'),
 
+    (New-WazuhSearchObject `
+        -Id "soc-ops-linux-ui-sensitive" `
+        -Title "SOC Operativo - Linux UI /Confidencial" `
+        -Description "DLP/FIM, ransomware, autenticacion critica y port scan del endpoint Linux UI." `
+        -Query 'rule.id: (100010 or 100015 or 100020 or 100030) or rule.groups: linux_ui_endpoint'),
+
     (New-WazuhDashboardObject `
         -Id "soc-ejecutivo-dashboard" `
         -Title "SOC Ejecutivo - PYME Mexico" `
@@ -268,7 +274,8 @@ $savedObjects = @(
             [ordered]@{ searchId = "soc-ops-edge-gateway"; x = 16; y = 24; w = 16; h = 12 },
             [ordered]@{ searchId = "soc-ops-db-server"; x = 32; y = 24; w = 16; h = 12 },
             [ordered]@{ searchId = "soc-ops-docker-host"; x = 0;  y = 36; w = 24; h = 12 },
-            [ordered]@{ searchId = "soc-ops-windows-server"; x = 24; y = 36; w = 24; h = 12 }
+            [ordered]@{ searchId = "soc-ops-windows-server"; x = 24; y = 36; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-ops-linux-ui-sensitive"; x = 0; y = 48; w = 48; h = 12 }
         ))
 )
 

@@ -3,6 +3,49 @@
      https://documentation.wazuh.com/current/user-manual/ruleset/ruleset-xml-syntax/rules.html -->
 
 <group name="pyme_mx,managed_soc,">
+  <rule id="100015" level="10">
+    <if_sid>550,553,554</if_sid>
+    <match>/Confidencial</match>
+    <description>DLP/FIM: sensitive folder activity detected under /Confidencial.</description>
+    <group>dlp,fim,syscheck,confidential_data,sensitive_folder,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.8.2.3,lfpdppp,</group>
+  </rule>
+
+  <rule id="100010" level="12" frequency="4" timeframe="10" ignore="60">
+    <if_matched_sid>100015</if_matched_sid>
+    <description>Ransomware heuristic: burst of changes detected in /Confidencial.</description>
+    <mitre>
+      <id>T1486</id>
+    </mitre>
+    <group>ransomware,impact,dlp,fim,syscheck,confidential_data,sensitive_folder,soc_incident,incident_priority_p1,critical_asset,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
+  <rule id="100020" level="10">
+    <if_sid>5716,5503</if_sid>
+    <match>esquivel</match>
+    <description>Critical failed authentication attempt targeting user esquivel.</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>authentication_failed,ssh,su,identity_attack_signal,critical_user,soc_signal,soc_correlation_seed,admin_plane,critical_asset,iso_27001_A.9.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100029" level="3">
+    <if_sid>4100</if_sid>
+    <match>wazuh-fw-drop:</match>
+    <description>Firewall dropped packet observed on monitored Linux UI endpoint.</description>
+    <group>firewall_event,network_telemetry,linux_ui_endpoint,soc_signal,</group>
+  </rule>
+
+  <rule id="100030" level="10" frequency="8" timeframe="30" ignore="60">
+    <if_matched_sid>100029</if_matched_sid>
+    <same_srcip />
+    <description>Port scan behavior detected from the same source IP against Linux UI endpoint.</description>
+    <mitre>
+      <id>T1595</id>
+    </mitre>
+    <group>reconnaissance,active_scanning,port_scan,firewall_event,network_telemetry,linux_ui_endpoint,soc_incident,incident_priority_p2,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
   <rule id="100100" level="12">
     <if_group>web|attack|attacks</if_group>
     <list field="srcip" lookup="address_match_key">etc/lists/blacklist-alienvault</list>
@@ -11,7 +54,7 @@
   </rule>
 
   <rule id="100110" level="10">
-    <if_group>web|attack|attacks</if_group>
+    <if_group>web</if_group>
     <description>PYME Mexico: web attack telemetry detected on monitored business app.</description>
     <group>web,attack,soc_signal,internet_facing,critical_asset,pci_dss_6.5,pci_dss_10.6.1,iso_27001_A.12.4.1,lfpdppp,</group>
   </rule>

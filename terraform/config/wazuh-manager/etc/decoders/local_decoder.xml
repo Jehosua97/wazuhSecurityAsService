@@ -1,0 +1,11 @@
+<!-- Local decoders for lab telemetry generated outside the default Wazuh ruleset. -->
+
+<decoder name="wazuh-firewall-drop">
+  <prematch>wazuh-fw-drop:</prematch>
+</decoder>
+
+<decoder name="wazuh-firewall-drop-fields">
+  <parent>wazuh-firewall-drop</parent>
+  <regex>SRC=(\S+) DST=(\S+).+PROTO=(\S+).+DPT=(\d+)</regex>
+  <order>srcip,dstip,protocol,dstport</order>
+</decoder>

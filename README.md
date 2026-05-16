@@ -13,6 +13,7 @@ Si quieres posicionarlo como servicio SOC para clientes, revisa también:
 - `docs/soc-dashboard-queries.md`
 - `docs/endpoint-onboarding.md`
 - `docs/endpoint-noise-playbook.md`
+- `docs/linux-ui-sensitive-lab.md`
 - `docs/wazuh-soc-dashboards.md`
 
 ## Que despliega
@@ -28,7 +29,7 @@ Si quieres posicionarlo como servicio SOC para clientes, revisa también:
 - Un panel web en el target con botones para lanzar pruebas controladas contra Juice Shop.
 - Artefactos controlados de cumplimiento en `/opt/pyme-compliance`.
 - Un laboratorio vulnerable con Juice Shop en el puerto `3000`.
-- Reglas locales Wazuh `100100-100204` para threat intelligence, ataques web, fuerza bruta SSH, FIM, correlación SOC, actividad del endpoint Metasploit, red/firewall/VPN, base de datos, docker host, Windows Server y acciones del panel.
+- Reglas locales Wazuh `100010`, `100015`, `100020`, `100030` y `100100-100204` para DLP/FIM, ransomware, autenticacion fallida, escaneo activo, threat intelligence, ataques web, fuerza bruta SSH, FIM, correlación SOC, actividad del endpoint Metasploit, red/firewall/VPN, base de datos, docker host, Windows Server y acciones del panel.
 - Integración con lista AlienVault convertida a CDB para bloqueo activo.
 - Firewall más segmentado: dashboard/SSH por `admin_source_ranges`, target demo por `target_source_ranges`, y puertos de agente desde la subnet privada mas `extra_agent_source_ranges` cuando necesites enrolar endpoints externos.
 
@@ -334,7 +335,7 @@ Ese script genera:
 
 En Wazuh revisa:
 
-- Alertas de reglas `100100-100204`.
+- Alertas de reglas `100010`, `100015`, `100020`, `100030` y `100100-100204`.
 - File Integrity Monitoring sobre `/opt/pyme-compliance`.
 - SCA y vulnerabilidades del endpoint.
 - Telemetría web de Apache y Juice Shop.
@@ -363,6 +364,7 @@ Luego ejecuta:
 ```
 
 Si quieres agregar endpoints nuevos al manager cloud, revisa `docs/endpoint-onboarding.md`.
+Para preparar un endpoint Linux con UI, carpeta `/Confidencial`, DLP/FIM, simulacion ransomware, autenticacion fallida de `esquivel` y escaneo Nmap, revisa `docs/linux-ui-sensitive-lab.md`.
 Para importar los dashboards ejecutivo y operativo en tu Wazuh actual:
 
 ```powershell
