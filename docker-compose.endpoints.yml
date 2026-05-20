@@ -1,0 +1,138 @@
+name: wazuh-local-endpoints
+
+x-linux-endpoint: &linux-endpoint
+  build:
+    context: ./docker/linux-endpoints
+  image: wazuh-local/linux-endpoint:latest
+  restart: unless-stopped
+  init: true
+  privileged: true
+  environment: &linux-env
+    WAZUH_MANAGER_IP: ${WAZUH_MANAGER_IP:?Set WAZUH_MANAGER_IP or run scripts/local-docker-lab.ps1}
+    WAZUH_VERSION: ${WAZUH_VERSION:-4.13.0-1}
+    METASPLOIT_WORKSPACE_NAME: ${METASPLOIT_WORKSPACE_NAME:-customer_pyme_demo}
+    DB_NAME: ${DB_NAME:-customer360}
+    DOCKER_DEMO_PORT: ${DOCKER_DEMO_PORT:-8081}
+    WIREGUARD_PORT: ${WIREGUARD_PORT:-51820}
+    LINUX_UI_USER: ${LINUX_UI_USER:-analista}
+  networks:
+    wazuh-local-lab:
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    restart: unless-stopped
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.9
+    ports:
+      - "${JUICE_SHOP_PORT:-3000}:3000"
+
+  pyme-demo-target:
+    <<: *linux-endpoint
+    hostname: pyme-demo-target
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: pyme-demo-target
+      WAZUH_AGENT_NAME: pyme-demo-target
+    depends_on:
+      - juice-shop
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.10
+    ports:
+      - "8080:80"
+    volumes:
+      - pyme_demo_target_ossec:/var/ossec
+
+  metasploit-node:
+    <<: *linux-endpoint
+    hostname: metasploit-node
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: metasploit-node
+      WAZUH_AGENT_NAME: metasploit-node
+      INSTALL_METASPLOIT: ${INSTALL_METASPLOIT:-false}
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.11
+    volumes:
+      - metasploit_node_ossec:/var/ossec
+
+  edge-gateway:
+    <<: *linux-endpoint
+    hostname: edge-gateway
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: edge-gateway
+      WAZUH_AGENT_NAME: edge-gateway
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.12
+    ports:
+      - "${WIREGUARD_PORT:-51820}:${WIREGUARD_PORT:-51820}/udp"
+    volumes:
+      - edge_gateway_ossec:/var/ossec
+
+  db-server:
+    <<: *linux-endpoint
+    hostname: db-server
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: db-server
+      WAZUH_AGENT_NAME: db-server
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.13
+    ports:
+      - "13306:3306"
+    volumes:
+      - db_server_ossec:/var/ossec
+
+  docker-host:
+    <<: *linux-endpoint
+    hostname: docker-host
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: docker-host
+      WAZUH_AGENT_NAME: docker-host
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.14
+    ports:
+      - "${DOCKER_DEMO_PORT:-8081}:${DOCKER_DEMO_PORT:-8081}"
+    volumes:
+      - docker_host_ossec:/var/ossec
+
+  linux-ui-workstation:
+    <<: *linux-endpoint
+    hostname: linux-ui-workstation
+    environment:
+      <<: *linux-env
+      ENDPOINT_PROFILE: linux-ui-workstation
+      WAZUH_AGENT_NAME: linux-ui-workstation
+    networks:
+      wazuh-local-lab:
+        ipv4_address: 172.30.50.15
+    ports:
+      - "13389:3389"
+    volumes:
+      - linux_ui_workstation_ossec:/var/ossec
+
+networks:
+  wazuh-local-lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.50.0/24
+
+volumes:
+  pyme_demo_target_ossec:
+  metasploit_node_ossec:
+  edge_gateway_ossec:
+  db_server_ossec:
+  docker_host_ossec:
+  linux_ui_workstation_ossec:

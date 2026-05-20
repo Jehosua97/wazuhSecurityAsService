@@ -1,0 +1,19 @@
+---
+- name: Run safe Windows AD demo events
+  hosts: win2016_dc
+  gather_facts: false
+  vars_files:
+    - ../group_vars/windows_ad_lab.yml
+
+  tasks:
+    - name: Run controlled AD demo event generator
+      ansible.windows.win_shell: |
+        powershell.exe -NoLogo -ExecutionPolicy Bypass -File "{{ wazuh_demo_dir }}\Generate-ADDemoEvents.ps1" -DemoDir "{{ wazuh_demo_dir }}" -DomainName "{{ ad_domain_fqdn }}"
+
+    - name: Show evidence path
+      ansible.builtin.debug:
+        msg:
+          - "Events generated safely on {{ inventory_hostname }}."
+          - "Evidence: {{ wazuh_demo_dir }}\\Evidence"
+          - "FIM folder: {{ wazuh_demo_dir }}\\Confidential"
+          - "Wazuh query: agent.name: \"{{ wazuh_agent_name }}\""

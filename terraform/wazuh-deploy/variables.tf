@@ -36,6 +36,12 @@ variable "extra_agent_source_ranges" {
   default     = []
 }
 
+variable "enable_gcp_endpoints" {
+  description = "Create the monitored lab endpoints in GCP. Set false when endpoints run locally in Docker and only Wazuh remains in GCP."
+  type        = bool
+  default     = false
+}
+
 variable "wazuh_machine_type" {
   description = "Machine type for the Wazuh single-node manager. Use e2-standard-4 or larger for longer demos."
   default     = "e2-medium"

@@ -301,6 +301,33 @@
     <group>windows_endpoint,windows_server,configuration_change,windows_endpoint_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_10.2.7,iso_27001_A.12.1.2,lfpdppp,</group>
   </rule>
 
+  <rule id="100205" level="6">
+    <program_name>windows-lab</program_name>
+    <description>PYME Mexico: local Docker Windows endpoint generated lab telemetry.</description>
+    <group>windows_endpoint,windows_server,soc_signal,critical_asset,compliance_scope,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100206" level="9">
+    <if_sid>100205</if_sid>
+    <match>action=failed_login</match>
+    <description>PYME Mexico: local Docker Windows failed login telemetry detected.</description>
+    <group>windows_endpoint,windows_server,authentication_failed,identity_attack_signal,windows_endpoint_signal,soc_signal,soc_correlation_seed,critical_asset,pci_dss_10.2.4,pci_dss_10.2.5,iso_27001_A.9.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100207" level="10">
+    <if_sid>100205</if_sid>
+    <match>action=privileged_process</match>
+    <description>PYME Mexico: local Docker Windows privileged process telemetry detected.</description>
+    <group>windows_endpoint,windows_server,privileged_activity,windows_endpoint_signal,soc_signal,soc_correlation_seed,critical_asset,pci_dss_10.2.2,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100208" level="8">
+    <if_sid>100205</if_sid>
+    <match>action=configuration_change</match>
+    <description>PYME Mexico: local Docker Windows configuration change telemetry detected.</description>
+    <group>windows_endpoint,windows_server,configuration_change,windows_endpoint_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,pci_dss_10.2.7,iso_27001_A.12.1.2,lfpdppp,</group>
+  </rule>
+
   <rule id="100194" level="12" frequency="3" timeframe="900" ignore="300">
     <if_matched_group>infrastructure_signal</if_matched_group>
     <description>PYME Mexico SOC: repeated infrastructure control-plane activity detected across gateway, database, or container endpoints.</description>

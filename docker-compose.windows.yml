@@ -1,0 +1,15 @@
+name: wazuh-local-windows-endpoint
+
+services:
+  windows-server:
+    build:
+      context: ./docker/windows-endpoint
+      args:
+        WINDOWS_BASE: ${WINDOWS_BASE:-mcr.microsoft.com/windows/servercore:ltsc2022}
+    image: wazuh-local/windows-endpoint:latest
+    hostname: windows-server
+    restart: unless-stopped
+    environment:
+      WAZUH_MANAGER_IP: ${WAZUH_MANAGER_IP:?Set WAZUH_MANAGER_IP or run scripts/local-docker-lab.ps1 -Scope Windows}
+      WAZUH_AGENT_NAME: windows-server
+      WAZUH_VERSION: ${WAZUH_VERSION:-4.13.0-1}

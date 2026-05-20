@@ -1,0 +1,22 @@
+---
+all:
+  children:
+    windows_ad_lab:
+      hosts:
+        win2016_bootstrap:
+          ansible_host: 127.0.0.1
+          ansible_port: 55985
+          ansible_user: vagrant
+          ansible_password: vagrant
+        win2016_dc:
+          ansible_host: 127.0.0.1
+          ansible_port: 55985
+          ansible_user: "{{ ad_domain_netbios }}\\Administrator"
+          ansible_password: "{{ windows_administrator_password }}"
+      vars:
+        ansible_connection: winrm
+        ansible_winrm_transport: basic
+        ansible_winrm_scheme: http
+        ansible_winrm_server_cert_validation: ignore
+        ansible_winrm_operation_timeout_sec: 120
+        ansible_winrm_read_timeout_sec: 180

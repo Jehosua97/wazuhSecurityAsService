@@ -1,0 +1,64 @@
+---
+- name: Bootstrap Windows Server 2016 before AD promotion
+  hosts: win2016_bootstrap
+  gather_facts: false
+  vars_files:
+    - ../group_vars/windows_ad_lab.yml
+
+  tasks:
+    - name: Check WinRM connectivity
+      ansible.windows.win_ping:
+
+    - name: Set local Administrator password for future domain admin
+      ansible.windows.win_user:
+        name: Administrator
+        password: "{{ windows_administrator_password }}"
+        account_disabled: false
+        password_never_expires: true
+        groups:
+          - Administrators
+
+    - name: Set hostname
+      ansible.windows.win_hostname:
+        name: "{{ windows_hostname }}"
+      register: hostname_result
+
+    - name: Reboot if hostname changed
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+      when: hostname_result.reboot_required | default(false)
+
+    - name: Ensure WinRM remains enabled for local lab
+      ansible.windows.win_powershell:
+        script: |
+          winrm quickconfig -q
+          winrm set winrm/config/service/auth '@{Basic="true"}'
+          winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+          Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $true
+          Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $true
+          Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True -ErrorAction SilentlyContinue
+          Enable-PSRemoting -Force
+
+    - name: Create demo directories
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ wazuh_demo_dir }}"
+        - "{{ wazuh_demo_dir }}\\Confidential"
+        - "{{ wazuh_demo_dir }}\\Evidence"
+        - "{{ wazuh_demo_dir }}\\Logs"
+
+    - name: Create baseline confidential demo file
+      ansible.windows.win_copy:
+        dest: "{{ wazuh_demo_dir }}\\Confidential\\access-review.txt"
+        content: |
+          Demo confidential file.
+          Changes in this folder are monitored by Wazuh FIM.
+
+    - name: Install AD management PowerShell tools
+      ansible.windows.win_feature:
+        name:
+          - RSAT-AD-PowerShell
+        include_management_tools: true
+        state: present

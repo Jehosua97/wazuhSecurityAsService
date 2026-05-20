@@ -250,7 +250,7 @@ agent.name: "pyme-demo-target" and rule.id: (100141 or 100143 or 100144 or 10015
 Para mostrar la nueva infraestructura monitoreada:
 
 ```text
-agent.name: ("edge-gateway" or "db-server" or "docker-host" or "windows-server") and rule.id: (100170 or 100171 or 100172 or 100173 or 100180 or 100181 or 100182 or 100183 or 100190 or 100191 or 100192 or 100193 or 100194 or 100200 or 100201 or 100202 or 100203 or 100204)
+agent.name: ("edge-gateway" or "db-server" or "docker-host" or "windows-server") and rule.id: (100170 or 100171 or 100172 or 100173 or 100180 or 100181 or 100182 or 100183 or 100190 or 100191 or 100192 or 100193 or 100194 or 100200 or 100201 or 100202 or 100203 or 100204 or 100205 or 100206 or 100207 or 100208)
 ```
 
 Para mostrar el endpoint Linux UI con carpeta sensible:

@@ -1,0 +1,36 @@
+---
+- name: Promote Windows Server 2016 to Active Directory Domain Controller
+  hosts: win2016_bootstrap
+  gather_facts: false
+  vars_files:
+    - ../group_vars/windows_ad_lab.yml
+
+  tasks:
+    - name: Install AD DS and DNS roles
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - DNS
+        include_management_tools: true
+        include_sub_features: true
+        state: present
+      register: ad_features
+
+    - name: Create new Active Directory forest
+      microsoft.ad.domain:
+        dns_domain_name: "{{ ad_domain_fqdn }}"
+        domain_netbios_name: "{{ ad_domain_netbios }}"
+        safe_mode_password: "{{ ad_safe_mode_password }}"
+      register: domain_result
+
+    - name: Reboot after domain promotion
+      ansible.windows.win_reboot:
+        reboot_timeout: 2400
+        post_reboot_delay: 90
+      when: domain_result.reboot_required | default(false)
+
+    - name: Configure DNS client to use local DNS
+      ansible.windows.win_dns_client:
+        adapter_names: "*"
+        dns_servers:
+          - "127.0.0.1"

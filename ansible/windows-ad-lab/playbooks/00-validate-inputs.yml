@@ -1,0 +1,23 @@
+---
+- name: Validate Windows AD lab variables and initial WinRM
+  hosts: win2016_bootstrap
+  gather_facts: false
+  vars_files:
+    - ../group_vars/windows_ad_lab.yml
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_ip is defined
+          - wazuh_manager_ip | length > 0
+          - wazuh_agent_name is defined
+          - wazuh_agent_name | length > 0
+          - ad_domain_fqdn is defined
+          - ad_domain_netbios is defined
+          - windows_administrator_password is defined
+          - ad_safe_mode_password is defined
+        fail_msg: "Copy group_vars/windows_ad_lab.example.yml to group_vars/windows_ad_lab.yml and fill required values."
+
+    - name: Check initial WinRM connectivity
+      ansible.windows.win_ping:

@@ -1,411 +1,533 @@
-# Wazuh IaC en GCP para PYMES en Mexico
+# Wazuh Security MVP
 
-Este repositorio despliega un MVP de Wazuh gestionado en Google Cloud Platform para demostrar una oferta de SIEM/XDR orientada a PYMES mexicanas. La solución fue adaptada con base en los PDFs de la carpeta:
+MVP de servicio de seguridad gestionada para PYMES usando Wazuh como plataforma principal de SIEM/XDR, monitoreo de endpoints, contenedores, File Integrity Monitoring, vulnerability management, alerting, reporting y respuesta operativa.
 
-- `Wazuh Analisis Estrategico Integral.pdf`
-- `Wazuh Guia Comercial y Certificaciones.pdf`
+Este repositorio convierte un laboratorio técnico en una demo comercial presentable para clientes. La arquitectura actual mantiene Wazuh en Google Cloud Platform y ejecuta los endpoints de cliente como contenedores locales en Docker, simulando un ambiente real de una PYME sin usar datos sensibles reales.
 
-El objetivo ya no es solo levantar Wazuh, sino mostrar una propuesta comercial y técnica: monitoreo 24/7, evidencia de cumplimiento, detección de amenazas, escaneo inicial y reportes ejecutivos para sectores como manufactura, retail, fintech, logística y salud.
+## Resumen ejecutivo
 
-Si quieres posicionarlo como servicio SOC para clientes, revisa también:
+El objetivo del proyecto es demostrar, vender y operar una oferta inicial de Managed Security / MSSP para PYMES con un equipo pequeño. La demo debe responder preguntas de negocio:
 
-- `docs/soc-mvp-playbook.md`
-- `docs/soc-dashboard-queries.md`
-- `docs/endpoint-onboarding.md`
-- `docs/endpoint-noise-playbook.md`
-- `docs/linux-ui-sensitive-lab.md`
-- `docs/wazuh-soc-dashboards.md`
+- Qué activos tengo monitoreados.
+- Qué vulnerabilidades y configuraciones inseguras existen.
+- Qué cambios críticos fueron detectados.
+- Qué alertas requieren atención.
+- Qué evidencia se puede entregar en un reporte.
+- Qué acciones recomienda el SOC.
+- Qué valor recibe el cliente cada mes.
 
-## Que despliega
+La solución está diseñada para defensa, monitoreo, educación y demostración controlada. No debe usarse para explotación real, pruebas contra terceros, evasión, persistencia, malware ni actividades sin autorización explícita.
 
-- Una VPC privada `vpc-wazuh` con subnet `10.0.1.0/24`.
-- Un `wazuh-server` single-node con Wazuh Docker `v4.13.0`.
-- Un endpoint `pyme-demo-target` con Apache, Docker, Juice Shop y agente Wazuh.
-- Un endpoint `metasploit-node` con Metasploit Framework y agente Wazuh.
-- Un endpoint `edge-gateway` con nftables, WireGuard y agente Wazuh.
-- Un endpoint `db-server` con MariaDB y agente Wazuh.
-- Un endpoint `docker-host` con Docker, portal demo y agente Wazuh.
-- Un endpoint `linux-ui-workstation` con XFCE/XRDP, agente Wazuh y carpeta sensible `/Confidencial` visible desde Documentos.
-- Un endpoint `windows-server` con Windows Server 2022 y agente Wazuh.
-- Un panel web en el target con botones para lanzar pruebas controladas contra Juice Shop.
-- Artefactos controlados de cumplimiento en `/opt/pyme-compliance`.
-- Un laboratorio vulnerable con Juice Shop en el puerto `3000`.
-- Reglas locales Wazuh `100010`, `100015`, `100020`, `100030` y `100100-100204` para DLP/FIM, ransomware, autenticacion fallida, escaneo activo, threat intelligence, ataques web, fuerza bruta SSH, FIM, correlación SOC, actividad del endpoint Metasploit, red/firewall/VPN, base de datos, docker host, Windows Server y acciones del panel.
-- Integración con lista AlienVault convertida a CDB para bloqueo activo.
-- Firewall más segmentado: dashboard/SSH por `admin_source_ranges`, target demo por `target_source_ranges`, y puertos de agente desde la subnet privada mas `extra_agent_source_ranges` cuando necesites enrolar endpoints externos.
+## Objetivo del MVP
 
-## Requisitos
+Construir una plataforma mínima viable que permita:
 
-- Proyecto GCP con billing habilitado.
-  Nota: GCP bloquea instancias Windows Server en proyectos Free Trial; para crear `windows-server`, la cuenta debe tener billing activo.
-- APIs habilitadas:
-  - Compute Engine API
-  - Cloud Resource Manager API
-  - IAM API
-- Terraform instalado.
-- Google Cloud CLI instalado.
-- Permisos para crear Compute Engine, VPC, firewall rules y discos.
-- Permisos de Cloud Storage para usar el backend remoto de Terraform state.
+- Aprender y operar Wazuh de forma práctica.
+- Mostrar una demo profesional de seguridad gestionada.
+- Simular un ambiente tipo cliente con servicios Linux en contenedores.
+- Generar eventos seguros y repetibles para demostrar detección.
+- Crear dashboards técnicos y ejecutivos.
+- Preparar reportes mensuales o de assessment.
+- Documentar playbooks, onboarding, hardening y operación.
+- Evolucionar hacia un servicio mensual para clientes reales.
 
-En esta máquina ya se detectaron `terraform` y `gcloud`, pero si corres desde otra máquina instala ambos primero.
-
-## Trabajo en equipo
-
-El estado de Terraform se guarda en un backend remoto de GCS:
+## Arquitectura general
 
 ```text
-gs://wazuh-security-service-tfstate-wazuh-iac-on-gcp/terraform/wazuh-deploy
+                         Equipo SOC / Demo
+                    PowerShell, Terraform, Docker
+                                |
+                                v
++-------------------------------+--------------------------------+
+|                         Google Cloud Platform                   |
+|                                                                 |
+|  +-------------------------+     +----------------------------+  |
+|  | wazuh-server            |     | Firewall / IAM / Backups    |  |
+|  | Wazuh Manager           |<----| Acceso restringido por IP   |  |
+|  | Wazuh Indexer           |     | Estado Terraform en GCS     |  |
+|  | Wazuh Dashboard         |     +----------------------------+  |
+|  +-------------------------+                                      |
+|         ^            ^                                            |
+|         | 1514/1515  | HTTPS                                      |
++---------|------------|--------------------------------------------+
+          |            |
+          |            v
++---------|--------------------------------------------------------+
+|         |                 Laptop / Ambiente Demo Local            |
+|         |                                                        |
+|  +------+-------------------+                                    |
+|  | Docker Compose           |                                    |
+|  | wazuh-local-endpoints    |                                    |
+|  +--------------------------+                                    |
+|    | pyme-demo-target        -> Web app, Apache, Juice Shop proxy |
+|    | db-server               -> MariaDB y logs de acceso          |
+|    | edge-gateway            -> firewall/VPN simulado             |
+|    | docker-host             -> eventos de contenedores           |
+|    | metasploit-node         -> endpoint de laboratorio controlado |
+|    | linux-ui-workstation    -> UI Linux, FIM, carpeta sensible   |
+|    | juice-shop              -> app vulnerable local de demo       |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
-Esto permite que cualquier integrante con permisos de GCP y acceso al repo pueda ejecutar `plan`, `apply` o `destroy` sin depender del `terraform.tfstate` local de otra persona.
+## Componentes actuales
 
-Si el bucket no existe en un proyecto nuevo, crealo una sola vez:
+- `terraform/wazuh-deploy`: infraestructura GCP con Terraform.
+- `terraform/config/wazuh-manager`: configuración administrada del manager Wazuh.
+- `docker-compose.endpoints.yml`: endpoints Linux locales del laboratorio.
+- `docker-compose.windows.yml`: endpoint Windows opcional, requiere Docker Desktop en modo Windows containers.
+- `docker/linux-endpoints`: imagen base de endpoints Linux con agente Wazuh y scripts de demo.
+- `docker/windows-endpoint`: imagen base de Windows Server demo.
+- `dashboards/wazuh-soc-dashboards.ndjson`: dashboards importables a Wazuh/OpenSearch Dashboards.
+- `demo-mode/`: scripts seguros para generar eventos controlados y evidencia local de demo.
+- `ansible/windows-ad-lab`: laboratorio Windows Server 2016 con Active Directory, usuarios demo y agente Wazuh para correr en otra PC con VirtualBox/Vagrant.
+- `scripts/lab-master.ps1`: consola maestra para operar GCP, Wazuh y contenedores.
+- `scripts/local-docker-lab.ps1`: operación directa de endpoints Docker.
+- `scripts/apply-wazuh-config.ps1`: aplica reglas, listas y configuración Wazuh al manager.
+- `scripts/import-wazuh-dashboards.ps1`: importa dashboards SOC al dashboard.
+- `docs/`: documentación técnica y playbooks actuales.
 
-```powershell
-gcloud storage buckets create gs://wazuh-security-service-tfstate-wazuh-iac-on-gcp --project=wazuh-iac-on-gcp --location=us-central1 --uniform-bucket-level-access
-```
+## Componentes a desarrollar
 
-En GitHub Actions configura estos secrets del repo:
+Estos entregables convertirán el laboratorio en un producto más comercial y repetible:
+
+- `ARCHITECTURE.md`: arquitectura objetivo, flujo de datos, riesgos y diseño multi-cliente futuro.
+- `DEPLOYMENT_GUIDE.md`: despliegue paso a paso en GCP y Docker local.
+- `DEMO_GUIDE.md`: guion técnico de demostración con evidencias esperadas.
+- `CLIENT_PRESENTATION_SCRIPT.md`: guion comercial de 10 y 30 minutos.
+- `SECURITY_HARDENING.md`: hardening de Wazuh en GCP.
+- `ONBOARDING_RUNBOOK.md`: proceso para assessments y servicio mensual.
+- `INCIDENT_RESPONSE_PLAYBOOKS.md`: playbooks SOC por tipo de alerta.
+- `REPORTING_GUIDE.md`: diseño de reportes PDF ejecutivos y técnicos.
+- `API_INTEGRATION_GUIDE.md`: webhooks, tickets y notificaciones.
+- `ROADMAP.md`: fases, entregables y criterios de aceptación.
+- `CHANGELOG.md`: historial de cambios técnicos y comerciales.
+- `reports/`: plantillas y ejemplos de reportes sin datos reales.
+- `client-material/`: one-pagers, propuestas, pricing y material comercial.
+
+## Casos de uso de demo
+
+La demo comercial debe cubrir al menos estos escenarios:
+
+1. Inventario de activos y visibilidad inicial.
+2. Detección de vulnerabilidades y priorización de riesgo.
+3. Cambio sospechoso en archivo crítico usando FIM.
+4. Evento anómalo en contenedores o servicio web.
+5. Respuesta activa controlada o ticket automatizado ante alerta crítica.
+
+Escenarios adicionales recomendados:
+
+- Endpoint desconectado o agente caído.
+- Configuración insegura detectada por SCA.
+- Múltiples intentos fallidos de autenticación simulados.
+- Cambios en carpeta sensible `/Confidencial`.
+- Evidencia para reporte mensual ejecutivo.
+
+## Alcance
+
+Incluido en este MVP:
+
+- Wazuh single-node en GCP para demo y laboratorio.
+- Endpoints Linux locales conectados al manager cloud.
+- Monitoreo con Wazuh agents.
+- Recolección de logs de sistema, servicios y aplicaciones demo.
+- FIM en rutas controladas.
+- Vulnerability Detection.
+- Security Configuration Assessment.
+- Dashboards SOC y base para dashboard ejecutivo.
+- Scripts seguros de simulación local.
+- Documentación operativa y comercial.
+- Preparación para assessments de 7 a 14 días.
+
+## Fuera de alcance
+
+No incluido en esta fase:
+
+- Explotación real contra terceros.
+- Pruebas sin autorización escrita del cliente.
+- Malware, evasión, persistencia o técnicas ofensivas reales.
+- Multi-tenant productivo con clientes reales mezclados.
+- SLA 24/7 formal sin procesos, cobertura y contratos definidos.
+- Almacenamiento de datos reales de clientes en el laboratorio demo.
+- Exposición pública del dashboard sin controles de acceso fuertes.
+
+## Requisitos técnicos
+
+Herramientas locales:
+
+- PowerShell 5.1 o superior.
+- Terraform.
+- Google Cloud CLI.
+- Docker Desktop.
+- Git.
+
+Requisitos GCP:
+
+- Proyecto con billing habilitado.
+- Compute Engine API habilitada.
+- Cloud Resource Manager API habilitada.
+- IAM API habilitada.
+- Permisos para crear VMs, discos, VPC, reglas de firewall e IPs.
+- Bucket GCS para Terraform state remoto.
+
+Requisitos Docker:
+
+- Docker Desktop en modo Linux containers para los endpoints Linux.
+- Docker Desktop en modo Windows containers solo si se usa `windows-server`.
+
+## Requisitos de seguridad
+
+Antes de mostrar la demo a clientes:
+
+- Restringir `admin_source_ranges` a IPs autorizadas.
+- Restringir `extra_agent_source_ranges` a IPs o VPN autorizadas.
+- Cambiar contraseñas por defecto y guardarlas en password manager.
+- No commitear `.env`, `terraform.tfvars`, credenciales, tokens ni reportes con datos reales.
+- Usar HTTPS con certificado válido para presentaciones externas.
+- Activar MFA donde aplique.
+- Separar ambiente demo, piloto y producción.
+- Revisar reglas de firewall antes de cada presentación.
+- Evitar mezclar datos de diferentes clientes en el mismo índice o tenant sin diseño formal.
+- Usar únicamente datos ficticios o sanitizados.
+
+## Estructura del repositorio
+
+Estructura actual y recomendada:
 
 ```text
-GCP_CREDENTIALS
-GCP_PROJECT_ID
-ZONE
+wazuh-security-mvp/
+├── README.md
+├── .github/
+│   └── workflows/
+├── dashboards/
+│   └── wazuh-soc-dashboards.ndjson
+├── docker/
+│   ├── linux-endpoints/
+│   └── windows-endpoint/
+├── docs/
+├── scripts/
+├── terraform/
+│   ├── config/
+│   └── wazuh-deploy/
+├── docker-compose.endpoints.yml
+├── docker-compose.windows.yml
+└── .env.example
 ```
 
-Luego ve a **Actions > Terraform Deployment > Run workflow** y elige:
+Estructura objetivo por crear:
 
-- `plan`: revisar cambios.
-- `apply`: levantar o actualizar infraestructura, aplicar configuración Wazuh e importar dashboards.
-- `destroy`: destruir la infraestructura administrada por Terraform.
+```text
+wazuh-security-mvp/
+├── docs/
+├── diagrams/
+├── scripts/
+├── demo-mode/
+├── reports/
+├── dashboards/
+├── playbooks/
+├── onboarding/
+├── integrations/
+├── infrastructure/
+├── client-material/
+├── templates/
+└── changelog/
+```
 
-## Configuracion rapida
+Guía de uso por carpeta:
 
-Desde PowerShell:
+- `docs`: documentación técnica principal.
+- `diagrams`: diagramas lógicos, red, flujo de datos y arquitectura comercial.
+- `scripts`: automatización operativa para GCP, Wazuh y Docker.
+- `demo-mode`: scripts seguros que generan eventos controlados.
+- `reports`: plantillas y reportes PDF de ejemplo.
+- `dashboards`: exports NDJSON y documentación de KPIs.
+- `playbooks`: respuesta SOC por tipo de incidente.
+- `onboarding`: checklists, autorización y offboarding.
+- `integrations`: webhooks, ticketing, Slack, Teams, n8n y API.
+- `infrastructure`: Terraform, hardening y módulos futuros.
+- `client-material`: guiones, one-pagers, paquetes y objeciones.
+- `templates`: plantillas de tickets, reportes y emails.
+- `changelog`: cambios por versión y entregable.
+
+## Roadmap
+
+### Fase 1: Demo técnica funcional
+
+Objetivo: validar que Wazuh en GCP recibe telemetría de endpoints locales.
+
+Entregables:
+
+- Wazuh en GCP operativo.
+- Endpoints Linux locales activos.
+- Reglas custom aplicadas.
+- Scripts de demo básicos.
+- Dashboards SOC importados.
+
+### Fase 2: Demo comercial
+
+Objetivo: convertir la demo técnica en una historia entendible para clientes.
+
+Entregables:
+
+- Guion de 10 minutos.
+- Guion de 30 minutos.
+- Cinco escenarios de demo.
+- Material de presentación.
+- Mensajes de valor por tipo de cliente.
+
+### Fase 3: Reportes y dashboards
+
+Objetivo: demostrar valor ejecutivo y evidencia mensual.
+
+Entregables:
+
+- Dashboard ejecutivo.
+- Plantilla PDF ejecutiva.
+- Plantilla PDF técnica.
+- KPIs y Security Score.
+- Export automático o semiautomático.
+
+### Fase 4: Onboarding de cliente piloto
+
+Objetivo: probar el servicio con un cliente controlado o ambiente propio realista.
+
+Entregables:
+
+- Runbook de onboarding.
+- Plantilla de autorización.
+- Checklist técnico.
+- Baseline inicial.
+- Reporte de assessment de 7 a 14 días.
+
+### Fase 5: Servicio mensual
+
+Objetivo: operar una oferta recurrente.
+
+Entregables:
+
+- Playbooks SOC.
+- Flujo de tickets.
+- Notificaciones.
+- Reporte mensual.
+- Métricas MTTD y MTTR.
+
+### Fase 6: Escalamiento multi-cliente
+
+Objetivo: separar clientes, datos, accesos y reportes.
+
+Entregables:
+
+- Diseño multi-cliente.
+- Separación por grupos, índices o despliegues.
+- Roles por cliente.
+- Retención y backup.
+- Procedimientos de privacidad.
+
+### Fase 7: Wazuh Partner
+
+Objetivo: formalizar operación, marca y capacidad comercial.
+
+Entregables:
+
+- Casos de éxito.
+- Paquetes comerciales.
+- Procesos documentados.
+- Controles internos.
+- Evidencia de operación.
+
+## Cómo ejecutar la demo
+
+### 1. Preparar credenciales locales
 
 ```powershell
-
 gcloud auth login
 gcloud auth application-default login
 gcloud config set project wazuh-iac-on-gcp
 gcloud config set compute/zone us-central1-a
-
-cd terraform\wazuh-deploy
-Copy-Item terraform.tfvars.example terraform.tfvars
-notepad terraform.tfvars
 ```
 
-Edita `terraform.tfvars` antes de aplicar. Para una demo segura, cambia:
+### 2. Configurar Terraform
+
+```powershell
+Copy-Item terraform\wazuh-deploy\terraform.tfvars.example terraform\wazuh-deploy\terraform.tfvars
+notepad terraform\wazuh-deploy\terraform.tfvars
+```
+
+Valores mínimos recomendados para demo segura:
 
 ```hcl
 admin_source_ranges = ["TU_IP_PUBLICA/32"]
 target_source_ranges = ["TU_IP_PUBLICA/32"]
 extra_agent_source_ranges = ["TU_IP_PUBLICA/32"]
+enable_gcp_endpoints = false
 ```
 
-Si lo dejas en `0.0.0.0/0`, cualquiera en internet podrá intentar llegar al dashboard, SSH o laboratorio demo según la regla correspondiente.
-`extra_agent_source_ranges` sirve para permitir el alta de endpoints externos como tu laptop, VMs fuera de GCP o redes conectadas por VPN.
-
-## Comandos rapidos
-
-### Levantar todo desde cero
-
-Ejecuta esto desde la raiz del repo en PowerShell:
+### 3. Levantar Wazuh en GCP
 
 ```powershell
-cd "C:\Users\Jehosua Joya\Desktop\Github Repos\Wazuh-IaC-on-GCP"
-
-gcloud auth login
-gcloud auth application-default login
-gcloud config set project wazuh-iac-on-gcp
-gcloud config set compute/zone us-central1-a
-
-if (-not (Test-Path "terraform\wazuh-deploy\terraform.tfvars")) {
-    Copy-Item "terraform\wazuh-deploy\terraform.tfvars.example" "terraform\wazuh-deploy\terraform.tfvars"
-}
-
-notepad "terraform\wazuh-deploy\terraform.tfvars"
-
 terraform -chdir="terraform/wazuh-deploy" init
 terraform -chdir="terraform/wazuh-deploy" validate
 terraform -chdir="terraform/wazuh-deploy" plan
 terraform -chdir="terraform/wazuh-deploy" apply
-
-.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"
-.\scripts\import-wazuh-dashboards.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a" -DashboardUser "admin" -DashboardPassword "SecretPassword"
-
-terraform -chdir="terraform/wazuh-deploy" output
 ```
 
-Esto hace:
-
-- autentica `gcloud`
-- prepara `terraform.tfvars`
-- crea toda la infraestructura en GCP
-- aplica reglas y tuning de Wazuh
-- importa los dashboards SOC
-- imprime las URLs e IPs finales
-
-### Borrar todo en GCP
-
-Ejecuta esto desde la raiz del repo:
+### 4. Aplicar configuración Wazuh
 
 ```powershell
-cd "C:\Users\Jehosua Joya\Desktop\Github Repos\Wazuh-IaC-on-GCP"
-
-gcloud auth login
-gcloud auth application-default login
-gcloud config set project wazuh-iac-on-gcp
-gcloud config set compute/zone us-central1-a
-
-terraform -chdir="terraform/wazuh-deploy" plan -destroy
-terraform -chdir="terraform/wazuh-deploy" destroy
-```
-
-Si quieres borrarlo sin confirmacion interactiva:
-
-```powershell
-terraform -chdir="terraform/wazuh-deploy" destroy -auto-approve
-```
-
-Esto elimina todo lo administrado por este estado:
-
-- VMs
-- discos
-- VPC y subnet
-- reglas de firewall
-- IPs y outputs asociados
-
-Nota:
-Usa siempre `terraform -chdir="terraform/wazuh-deploy"` o entra a esa carpeta antes de correr `destroy`.
-Si lo ejecutas desde otra ruta con otro estado, Terraform puede decir que no hay nada por borrar aunque los recursos sigan vivos.
-
-## Despliegue
-
-Desde `terraform\wazuh-deploy`:
-
-```powershell
-terraform init
-terraform validate
-terraform plan
-terraform apply
-terraform output
-```
-
-Si ya tenias un despliegue anterior, revisa bien el `terraform plan`: la versión actual cambia nombres, tags, startup scripts y reglas de firewall, por lo que Terraform puede reemplazar VMs existentes.
-
-## Aplicar reglas y tuning de Wazuh
-
-El startup de la VM levanta Wazuh. Después aplica la configuración gestionada del manager:
-
-```powershell
-cd "C:\Users\Jehosua Joya\Desktop\Github Repos\Wazuh-IaC-on-GCP"
 .\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"
 ```
 
-Esto copia `terraform/config/wazuh-manager` al manager y aplica:
+### 5. Importar dashboards
 
-- `ossec.conf` con FIM, SCA, vulnerability detection y active response.
-- `local_rules.xml` con reglas PYME Mexico.
-- Lista AlienVault para reputación IP.
-- Conversión de IP set a CDB list.
-
-## Acceso
-
-Obtén URLs con:
+Define la contraseña del dashboard como variable de entorno antes de importar:
 
 ```powershell
-cd terraform\wazuh-deploy
-terraform output
+$env:WAZUH_DASHBOARD_PASSWORD = "CAMBIAR_EN_PASSWORD_MANAGER"
+.\scripts\import-wazuh-dashboards.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a" -DashboardUser "admin" -DashboardPassword $env:WAZUH_DASHBOARD_PASSWORD
 ```
 
-El dashboard queda en:
+### 6. Levantar endpoints Linux locales
+
+```powershell
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action up
+```
+
+### 7. Revisar estado del laboratorio
+
+```powershell
+.\scripts\lab-master.ps1 -Action status
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action status
+```
+
+### 8. Generar eventos seguros de demo
+
+```powershell
+docker compose -f docker-compose.endpoints.yml exec pyme-demo-target /usr/local/bin/pyme-demo-generate-events.sh
+docker compose -f docker-compose.endpoints.yml exec edge-gateway /usr/local/bin/gateway-demo-generate-events.sh
+docker compose -f docker-compose.endpoints.yml exec db-server /usr/local/bin/db-demo-generate-events.sh
+docker compose -f docker-compose.endpoints.yml exec docker-host /usr/local/bin/docker-demo-generate-events.sh
+docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/simulate-confidential-ransomware-burst.sh
+docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/linux-ui-demo-auth-failure.sh
+```
+
+### 9. Validar en Wazuh
+
+Buscar en Security Events:
 
 ```text
-https://IP_PUBLICA_WAZUH
-```
-
-Credenciales por defecto de Wazuh Docker:
-
-```text
-Usuario: admin
-Password: SecretPassword
-```
-
-Cambia la contraseña al primer acceso.
-
-## Demo comercial y tecnica
-
-Después del despliegue, el target expone:
-
-- Attack Control Center: `http://IP_PUBLICA_TARGET/panel/`
-- Juice Shop por Apache y misma origin del panel: `http://IP_PUBLICA_TARGET/`
-- Juice Shop directo al contenedor: `http://IP_PUBLICA_TARGET:3000`
-
-El Attack Control Center carga Juice Shop en la misma pagina y muestra botones para:
-
-- SQLi login controlado.
-- XSS search probe.
-- Recon de API/productos.
-- Cambio de evidencia FIM.
-- Ejecucion completa de todas las pruebas.
-
-Cada boton registra un evento en `/var/log/pyme-attack-panel.log`, actualiza el historial visible en la web y manda telemetria al agente Wazuh. En el dashboard puedes buscar:
-
-```text
-rule.id: 100140 or rule.id: 100141 or rule.id: 100142 or rule.id: 100143 or rule.id: 100144 or rule.id: 100145 or rule.id: 100150 or rule.id: 100151 or rule.id: 100152 or rule.id: 100153
-```
-
-Para consultas tipo SOC y listas operativas ya preparadas, revisa `docs/soc-dashboard-queries.md`.
-Para una guia de que endpoint disparar y que deberias ver, revisa `docs/endpoint-noise-playbook.md`.
-Si quieres importar dashboards listos para cliente y SOC, revisa `docs/wazuh-soc-dashboards.md`.
-
-Tambien se despliega un endpoint ofensivo monitoreado:
-
-- Metasploit node: `metasploit-node`
-- Agente esperado en Wazuh: `metasploit-node`
-
-Para conectarte:
-
-```powershell
-gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/msf-lab-console"
-```
-
-Para generar telemetria controlada del endpoint Metasploit:
-
-```powershell
-gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/metasploit-demo-generate-events.sh"
-```
-
-Y en Wazuh puedes buscar:
-
-```text
-agent.name: "metasploit-node" and (rule.id: 100160 or rule.id: 100161 or rule.id: 100162 or rule.id: 100163 or rule.id: 100164)
-```
-
-Tambien se despliegan endpoints adicionales para ampliar el alcance del laboratorio:
-
-- `edge-gateway`: firewall/VPN con WireGuard y nftables.
-- `db-server`: base de datos MariaDB con datos demo y eventos de acceso sensible.
-- `docker-host`: host de contenedores con portal web demo.
-- `linux-ui-workstation`: Linux con interfaz grafica, XRDP y carpeta sensible `/Confidencial`.
-- `windows-server`: Windows Server 2022 con agente Wazuh y eventos de Application Log.
-
-Para generar telemetria controlada:
-
-```powershell
-gcloud compute ssh edge-gateway --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/gateway-demo-generate-events.sh"
-gcloud compute ssh db-server --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/db-demo-generate-events.sh"
-gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-demo-generate-events.sh"
-gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/simulate-confidential-ransomware-burst.sh"
-gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/linux-ui-demo-auth-failure.sh"
-gcloud compute ssh metasploit-node --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo bash -lc 'command -v nmap >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nmap); nmap -Pn -sS -T4 -p1-1024 10.0.1.19'"
-```
-
-Para entrar por RDP a la estacion Linux UI, obten las credenciales generadas:
-
-```powershell
-gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo cat /root/linux-ui-rdp-credentials.txt"
-```
-
-Luego abre RDP a la IP publica de `linux-ui-workstation` y usa el usuario `analista`.
-
-Para Windows, obten primero o reinicia la contrasena de Administrator:
-
-```powershell
-gcloud compute reset-windows-password windows-server --project=wazuh-iac-on-gcp --zone=us-central1-a --user=Administrator
-```
-
-Luego entra por RDP y ejecuta:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File C:\ProgramData\WazuhDemo\Generate-WindowsDemoEvents.ps1
-```
-
-Consultas recomendadas:
-
-```text
+agent.name: "linux-ui-workstation" and rule.id: (100010 or 100015 or 100020 or 100030)
 agent.name: "edge-gateway" and rule.groups: edge_gateway
 agent.name: "db-server" and rule.groups: database_endpoint
 agent.name: "docker-host" and rule.groups: docker_host
-agent.name: "linux-ui-workstation" and rule.id: (100010 or 100015 or 100020 or 100030)
-agent.name: "windows-server" and rule.groups: windows_endpoint
-rule.groups: infrastructure_incident
+agent.name: "pyme-demo-target"
 ```
 
-Para generar eventos controlados de demo:
+## Operación con script maestro
+
+El script `scripts/lab-master.ps1` centraliza operación del laboratorio:
 
 ```powershell
-gcloud compute ssh pyme-demo-target --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/pyme-demo-generate-events.sh"
+.\scripts\lab-master.ps1 -Action menu
+.\scripts\lab-master.ps1 -Action status
+.\scripts\lab-master.ps1 -Action full-start
+.\scripts\lab-master.ps1 -Action cost-saver
+.\scripts\lab-master.ps1 -Action stop-linux
+.\scripts\lab-master.ps1 -Action start-linux
 ```
 
-Ese script genera:
+`cost-saver` detiene los contenedores locales y apaga la VM de Wazuh, pero no destruye la infraestructura. La IP pública del manager debe mantenerse porque Terraform reserva y asigna `wazuh-server-public-ip` como IP estática. Al ejecutar `full-start`, el script vuelve a resolver la IP real desde GCP antes de levantar los agentes locales.
 
-- Intento de login SSH fallido.
-- Evento web tipo inyección contra Apache.
-- Cambio en evidencia de cumplimiento.
-- Cambio en carpeta con permisos débiles.
-- Evento `pyme-demo` para reporte ejecutivo.
+Acciones destructivas como `destroy-gcp` o `destroy-linux` deben ejecutarse solo cuando se quiera eliminar infraestructura o volúmenes del laboratorio.
 
-En Wazuh revisa:
+## Cómo documentar cambios
 
-- Alertas de reglas `100010`, `100015`, `100020`, `100030` y `100100-100204`.
-- File Integrity Monitoring sobre `/opt/pyme-compliance`.
-- SCA y vulnerabilidades del endpoint.
-- Telemetría web de Apache y Juice Shop.
-- Inventario, vulnerabilidades y actividad del endpoint Metasploit.
+Cada cambio relevante debe quedar documentado:
 
-## Como se alineo con la propuesta de los PDFs
+1. Actualizar el archivo técnico afectado en `docs/`.
+2. Registrar cambios visibles para clientes en `CHANGELOG.md` cuando exista.
+3. Agregar comandos de prueba usados.
+4. Indicar impacto en seguridad, costos o demo.
+5. No incluir secretos, IPs privadas de clientes, datos personales ni evidencia real.
+6. Si se agrega una regla Wazuh, documentar:
+   - ID de regla.
+   - Severidad.
+   - Grupo.
+   - Fuente de logs.
+   - Escenario de demo asociado.
+   - Consulta recomendada en dashboard.
 
-- Enfoque PYME: el target simula una empresa mexicana con datos personales, web app vulnerable y evidencia de auditoria.
-- Cumplimiento: reglas y grupos etiquetan LFPDPPP, PCI-DSS e ISO 27001.
-- Venta consultiva: la landing page y el script demo soportan el discurso de "escaneo gratuito" y "evidencia ejecutiva".
-- Monitoreo gestionado: `apply-wazuh-config.ps1` permite operar el tuning como servicio recurrente.
-- Diferenciacion: se activa FIM, SCA, vulnerability detection, active response y threat intelligence sin licencias propietarias.
-
-## Actualizar configuracion
-
-Modifica archivos en:
+Formato sugerido para cambios:
 
 ```text
-terraform/config/wazuh-manager
+Fecha:
+Cambio:
+Motivo:
+Archivos modificados:
+Validación:
+Riesgo:
+Rollback:
 ```
 
-Luego ejecuta:
+## Criterios de aceptación del MVP
 
-```powershell
-.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"
-```
+El MVP está listo para mostrarse a un cliente cuando:
 
-Si quieres agregar endpoints nuevos al manager cloud, revisa `docs/endpoint-onboarding.md`.
-Para preparar un endpoint Linux con UI, carpeta `/Confidencial`, DLP/FIM, simulacion ransomware, autenticacion fallida de `esquivel` y escaneo Nmap, revisa `docs/linux-ui-sensitive-lab.md`.
-Para importar los dashboards ejecutivo y operativo en tu Wazuh actual:
+- Wazuh sea accesible de forma segura.
+- Los agentes estén conectados y activos.
+- Los contenedores locales estén monitoreados.
+- FIM genere alertas esperadas.
+- Vulnerability Detection esté funcionando.
+- SCA esté generando baseline.
+- Existan al menos cinco escenarios de demo repetibles.
+- El dashboard técnico esté preparado.
+- El dashboard ejecutivo tenga KPIs definidos.
+- Exista un reporte PDF demo.
+- Las notificaciones o tickets estén integrados al menos en versión básica.
+- Los playbooks SOC estén documentados.
+- El onboarding esté documentado.
+- El hardening mínimo de GCP esté aplicado.
+- La demo de 10 y 30 minutos esté ensayada.
+- El material comercial esté listo.
 
-```powershell
-.\scripts\import-wazuh-dashboards.ps1
-```
+## Documentación relacionada
 
-También existe GitHub Actions para despliegue inicial y actualización de configuración, pero localmente el flujo anterior es más directo.
+Documentos existentes:
 
-## Apagar o destruir
+- `ansible/windows-ad-lab/README.md`
+- `docs/local-docker-endpoints.md`
+- `docs/lab-master.md`
+- `docs/linux-ui-sensitive-lab.md`
+- `docs/endpoint-noise-playbook.md`
+- `docs/endpoint-onboarding.md`
+- `docs/soc-dashboard-queries.md`
+- `docs/soc-mvp-playbook.md`
+- `docs/wazuh-soc-dashboards.md`
 
-Para eliminar todos los recursos creados por Terraform:
+Documentos por crear:
 
-```powershell
-cd "C:\Users\Jehosua Joya\Desktop\Github Repos\Wazuh-IaC-on-GCP"
-terraform -chdir="terraform/wazuh-deploy" plan -destroy
-terraform -chdir="terraform/wazuh-deploy" destroy
-```
+- `ARCHITECTURE.md`
+- `DEPLOYMENT_GUIDE.md`
+- `DEMO_GUIDE.md`
+- `CLIENT_PRESENTATION_SCRIPT.md`
+- `SECURITY_HARDENING.md`
+- `ONBOARDING_RUNBOOK.md`
+- `INCIDENT_RESPONSE_PLAYBOOKS.md`
+- `REPORTING_GUIDE.md`
+- `API_INTEGRATION_GUIDE.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
 
-Esto borra VMs, discos, red y reglas de firewall administradas por este estado.
+## Próximos pasos
 
-## Costos y seguridad
+1. Crear `ARCHITECTURE.md` con arquitectura objetivo, flujo de datos, riesgos y separación futura por cliente.
+2. Crear `DEMO_GUIDE.md` con los cinco escenarios comerciales.
+3. Crear `SECURITY_HARDENING.md` y aplicar controles mínimos antes de demos externas.
+4. Crear `REPORTING_GUIDE.md` con plantilla de reporte ejecutivo y técnico.
+5. Crear `INCIDENT_RESPONSE_PLAYBOOKS.md` con playbooks SOC.
+6. Crear `ONBOARDING_RUNBOOK.md` para assessments de 7 a 14 días.
+7. Implementar dashboard ejecutivo y Security Score.
+8. Implementar integración inicial con notificaciones y tickets.
 
-Este laboratorio crea recursos que generan costo en GCP. No lo dejes encendido si no lo vas a usar.
+## Principio rector
 
-Antes de mostrarlo a prospectos:
-
-- Restringe `admin_source_ranges`.
-- Cambia la contraseña default del dashboard.
-- No uses datos reales en `/opt/pyme-compliance`.
-- Revisa que el laboratorio Juice Shop solo esté expuesto al público deseado.
+Este proyecto debe ayudar a vender confianza, no miedo. La demo debe mostrar visibilidad, priorización, evidencia y respuesta clara. El cliente debe salir entendiendo qué riesgo tiene, qué se está monitoreando, qué acciones se recomiendan y qué valor recibe al contratar el servicio.

@@ -144,7 +144,7 @@ powershell.exe -ExecutionPolicy Bypass -File C:\ProgramData\WazuhDemo\Generate-W
 
 Alertas esperadas:
 
-- `100200-100204`
+- `100200-100208`
 
 ## Consultas rapidas en Wazuh
 

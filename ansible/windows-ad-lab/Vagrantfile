@@ -1,0 +1,49 @@
+# frozen_string_literal: true
+
+WINDOWS_BOX = ENV.fetch("WINDOWS_BOX", "gusztavvargadr/windows-server-2016-standard")
+WINDOWS_HOSTNAME = ENV.fetch("WINDOWS_HOSTNAME", "ad2016-lab")
+WINDOWS_VM_NAME = ENV.fetch("WINDOWS_VM_NAME", "wazuh-ad2016-lab")
+WINDOWS_ADMIN_PASSWORD = ENV.fetch("WINDOWS_ADMIN_PASSWORD", "ChangeMe!2026")
+WINDOWS_PRIVATE_IP = ENV.fetch("WINDOWS_PRIVATE_IP", "192.168.56.60")
+WINDOWS_VM_MEMORY = ENV.fetch("WINDOWS_VM_MEMORY", "4096").to_i
+WINDOWS_VM_CPUS = ENV.fetch("WINDOWS_VM_CPUS", "2").to_i
+
+Vagrant.configure("2") do |config|
+  config.vm.box = WINDOWS_BOX
+  config.vm.hostname = WINDOWS_HOSTNAME
+  config.vm.communicator = "winrm"
+
+  config.winrm.username = ENV.fetch("VAGRANT_WINRM_USER", "vagrant")
+  config.winrm.password = ENV.fetch("VAGRANT_WINRM_PASSWORD", "vagrant")
+  config.winrm.timeout = 1800
+  config.winrm.retry_limit = 60
+  config.winrm.retry_delay = 10
+
+  config.vm.network "forwarded_port",
+                    guest: 5985,
+                    host: ENV.fetch("WINDOWS_WINRM_PORT", "55985").to_i,
+                    id: "winrm",
+                    auto_correct: true
+
+  config.vm.network "private_network", ip: WINDOWS_PRIVATE_IP
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = WINDOWS_VM_NAME
+    vb.memory = WINDOWS_VM_MEMORY
+    vb.cpus = WINDOWS_VM_CPUS
+    vb.gui = ENV.fetch("WINDOWS_VM_GUI", "false") == "true"
+  end
+
+  config.vm.provision "shell", privileged: true, inline: <<-POWERSHELL
+    $ErrorActionPreference = "SilentlyContinue"
+    winrm quickconfig -q
+    winrm set winrm/config/service/auth '@{Basic="true"}'
+    winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+    Set-Item -Path WSMan:\\localhost\\Service\\Auth\\Basic -Value $true
+    Set-Item -Path WSMan:\\localhost\\Service\\AllowUnencrypted -Value $true
+    Set-NetFirewallRule -DisplayGroup "Windows Remote Management" -Enabled True
+    Enable-PSRemoting -Force
+    net user Administrator "#{WINDOWS_ADMIN_PASSWORD}" /active:yes
+    net user Administrator "#{WINDOWS_ADMIN_PASSWORD}"
+  POWERSHELL
+end

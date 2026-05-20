@@ -21,6 +21,17 @@ resource "google_compute_subnetwork" "vpc_wazuh_subnet" {
   depends_on    = [google_compute_network.vpc_wazuh]
 }
 
+resource "google_compute_address" "wazuh_server_public_ip" {
+  name   = "wazuh-server-public-ip"
+  region = var.region
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "manager"
+  }
+}
+
 # Wazuh single-node manager used as the managed SIEM/XDR control plane.
 resource "google_compute_instance" "wazuh_server" {
   name         = "wazuh-server"
@@ -93,11 +104,21 @@ resource "google_compute_firewall" "admin_ssh_firewall" {
   }
 
   source_ranges = var.admin_source_ranges
-  target_tags   = ["wazuh-manager", "vulnerable-target", "metasploit-endpoint", "edge-gateway", "db-server", "docker-host", "linux-ui-endpoint"]
+  target_tags = var.enable_gcp_endpoints ? [
+    "wazuh-manager",
+    "vulnerable-target",
+    "metasploit-endpoint",
+    "edge-gateway",
+    "db-server",
+    "docker-host",
+    "linux-ui-endpoint",
+  ] : ["wazuh-manager"]
 }
 
 # RDP access for the monitored Windows endpoint. Restrict admin_source_ranges before production use.
 resource "google_compute_firewall" "windows_rdp_firewall" {
+  count = var.enable_gcp_endpoints && var.enable_windows_server ? 1 : 0
+
   name    = "windows-rdp-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -112,6 +133,8 @@ resource "google_compute_firewall" "windows_rdp_firewall" {
 
 # RDP access for the monitored Linux UI endpoint. Restrict admin_source_ranges before production use.
 resource "google_compute_firewall" "linux_ui_rdp_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "linux-ui-rdp-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -126,6 +149,8 @@ resource "google_compute_firewall" "linux_ui_rdp_firewall" {
 
 # Allow scan traffic to reach the Linux UI endpoint so nftables can log and drop it locally for Wazuh.
 resource "google_compute_firewall" "linux_ui_scan_test_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "linux-ui-scan-test-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -143,6 +168,8 @@ resource "google_compute_firewall" "linux_ui_scan_test_firewall" {
 
 # Monitored target used to demonstrate the free scan, FIM, SCA, web attacks and compliance evidence.
 resource "google_compute_instance" "ubuntu_endpoint" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.target_instance_name
   machine_type = var.target_machine_type
   zone         = var.zone
@@ -180,6 +207,8 @@ resource "google_compute_instance" "ubuntu_endpoint" {
 
 # Monitored Metasploit endpoint used as an offensive workstation inside the lab.
 resource "google_compute_instance" "metasploit_endpoint" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.metasploit_instance_name
   machine_type = var.metasploit_machine_type
   zone         = var.zone
@@ -215,6 +244,8 @@ resource "google_compute_instance" "metasploit_endpoint" {
 
 # Monitored edge gateway endpoint with firewall and VPN telemetry.
 resource "google_compute_instance" "edge_gateway" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.edge_gateway_instance_name
   machine_type = var.edge_gateway_machine_type
   zone         = var.zone
@@ -250,6 +281,8 @@ resource "google_compute_instance" "edge_gateway" {
 
 # Monitored internal database endpoint.
 resource "google_compute_instance" "db_server" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.db_server_instance_name
   machine_type = var.db_server_machine_type
   zone         = var.zone
@@ -285,6 +318,8 @@ resource "google_compute_instance" "db_server" {
 
 # Monitored docker host endpoint with sample business containers.
 resource "google_compute_instance" "docker_host" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.docker_host_instance_name
   machine_type = var.docker_host_machine_type
   zone         = var.zone
@@ -320,6 +355,8 @@ resource "google_compute_instance" "docker_host" {
 
 # Monitored Linux desktop endpoint for DLP/FIM, ransomware heuristics, auth failures and port-scan demos.
 resource "google_compute_instance" "linux_ui_workstation" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name         = var.linux_ui_instance_name
   machine_type = var.linux_ui_machine_type
   zone         = var.zone
@@ -340,7 +377,9 @@ resource "google_compute_instance" "linux_ui_workstation" {
   network_interface {
     network    = google_compute_network.vpc_wazuh.self_link
     subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
-    access_config {}
+    access_config {
+      nat_ip = google_compute_address.wazuh_server_public_ip.address
+    }
   }
 
   tags = ["linux-ui-endpoint", "desktop-endpoint", "sensitive-data-lab"]
@@ -355,7 +394,7 @@ resource "google_compute_instance" "linux_ui_workstation" {
 
 # Monitored Windows Server endpoint with Wazuh agent and controlled event telemetry.
 resource "google_compute_instance" "windows_server" {
-  count = var.enable_windows_server ? 1 : 0
+  count = var.enable_gcp_endpoints && var.enable_windows_server ? 1 : 0
 
   name         = var.windows_instance_name
   machine_type = var.windows_machine_type
@@ -377,7 +416,9 @@ resource "google_compute_instance" "windows_server" {
   network_interface {
     network    = google_compute_network.vpc_wazuh.self_link
     subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
-    access_config {}
+    access_config {
+      nat_ip = google_compute_address.wazuh_server_public_ip.address
+    }
   }
 
   tags = ["windows-endpoint", "managed-windows"]
@@ -393,6 +434,8 @@ resource "google_compute_instance" "windows_server" {
 
 # Public access to the landing page and Juice Shop lab for sales demos.
 resource "google_compute_firewall" "target_lab_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "target-lab-firewall"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -407,6 +450,8 @@ resource "google_compute_firewall" "target_lab_firewall" {
 
 # Public WireGuard listener for the monitored edge gateway lab.
 resource "google_compute_firewall" "edge_gateway_vpn_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "edge-gateway-vpn-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -421,6 +466,8 @@ resource "google_compute_firewall" "edge_gateway_vpn_firewall" {
 
 # Internal database access for workloads inside the lab.
 resource "google_compute_firewall" "db_internal_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "db-internal-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 
@@ -435,6 +482,8 @@ resource "google_compute_firewall" "db_internal_firewall" {
 
 # Public access to the sample portal on the monitored docker host.
 resource "google_compute_firewall" "docker_host_demo_firewall" {
+  count = var.enable_gcp_endpoints ? 1 : 0
+
   name    = "docker-host-demo-ingress"
   network = google_compute_network.vpc_wazuh.self_link
 

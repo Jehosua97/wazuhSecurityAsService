@@ -1,0 +1,171 @@
+---
+- name: Configure AD demo users, Wazuh Agent and safe demo telemetry
+  hosts: win2016_dc
+  gather_facts: false
+  vars_files:
+    - ../group_vars/windows_ad_lab.yml
+
+  tasks:
+    - name: Check domain admin WinRM connectivity
+      ansible.windows.win_ping:
+
+    - name: Ensure demo OUs exist
+      microsoft.ad.ou:
+        name: "{{ item }}"
+        path: "{{ ad_base_dn }}"
+        state: present
+      loop:
+        - "{{ ad_users_ou_name }}"
+        - "{{ ad_groups_ou_name }}"
+        - "{{ ad_service_accounts_ou_name }}"
+
+    - name: Ensure demo groups exist
+      microsoft.ad.group:
+        name: "{{ item.name }}"
+        description: "{{ item.description | default('Demo group') }}"
+        path: "OU={{ ad_groups_ou_name }},{{ ad_base_dn }}"
+        scope: global
+        category: security
+        state: present
+      loop: "{{ ad_groups }}"
+
+    - name: Ensure demo users exist
+      microsoft.ad.user:
+        name: "{{ item.firstname }} {{ item.surname }}"
+        sam_account_name: "{{ item.username }}"
+        upn: "{{ item.username }}@{{ ad_domain_fqdn }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        password: "{{ item.password }}"
+        password_never_expires: true
+        user_cannot_change_password: false
+        enabled: true
+        path: "OU={{ ad_users_ou_name }},{{ ad_base_dn }}"
+        state: present
+      loop: "{{ ad_users }}"
+      no_log: true
+
+    - name: Ensure demo user group membership
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = "Stop"
+          Import-Module ActiveDirectory
+          $User = "{{ item.username }}"
+          $Groups = ConvertFrom-Json @'
+          {{ item.groups | default([]) | to_json }}
+          '@
+
+          foreach ($Group in $Groups) {
+            $Member = Get-ADGroupMember -Identity $Group -Recursive | Where-Object { $_.SamAccountName -eq $User }
+            if (-not $Member) {
+              Add-ADGroupMember -Identity $Group -Members $User
+            }
+          }
+      loop: "{{ ad_users }}"
+
+    - name: Ensure demo service accounts exist
+      microsoft.ad.user:
+        name: "{{ item.username }}"
+        sam_account_name: "{{ item.username }}"
+        upn: "{{ item.username }}@{{ ad_domain_fqdn }}"
+        firstname: "{{ item.firstname }}"
+        surname: "{{ item.surname }}"
+        description: "{{ item.description | default('Demo service account') }}"
+        password: "{{ item.password }}"
+        password_never_expires: true
+        enabled: true
+        path: "OU={{ ad_service_accounts_ou_name }},{{ ad_base_dn }}"
+        state: present
+      loop: "{{ ad_service_accounts }}"
+      no_log: true
+
+    - name: Ensure demo directories exist
+      ansible.windows.win_file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "{{ wazuh_demo_dir }}"
+        - "{{ wazuh_demo_dir }}\\Confidential"
+        - "{{ wazuh_demo_dir }}\\Evidence"
+        - "{{ wazuh_demo_dir }}\\Logs"
+
+    - name: Download Wazuh Windows agent MSI
+      ansible.windows.win_get_url:
+        url: "https://packages.wazuh.com/4.x/windows/wazuh-agent-{{ wazuh_agent_version }}.msi"
+        dest: "C:\\Windows\\Temp\\wazuh-agent-{{ wazuh_agent_version }}.msi"
+
+    - name: Check Wazuh service
+      ansible.windows.win_service_info:
+        name: WazuhSvc
+      register: wazuh_service
+
+    - name: Install Wazuh Windows agent
+      ansible.windows.win_package:
+        path: "C:\\Windows\\Temp\\wazuh-agent-{{ wazuh_agent_version }}.msi"
+        state: present
+        arguments: '/qn WAZUH_MANAGER="{{ wazuh_manager_ip }}" WAZUH_REGISTRATION_SERVER="{{ wazuh_manager_ip }}" WAZUH_AGENT_NAME="{{ wazuh_agent_name }}"'
+      when: wazuh_service.services | length == 0
+
+    - name: Configure Wazuh Windows telemetry and FIM
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = "Stop"
+          $AgentConfig = "C:\Program Files (x86)\ossec-agent\ossec.conf"
+          $DemoDir = "{{ wazuh_demo_dir }}"
+          $Block = @"
+            <!-- ANSIBLE_WINDOWS_AD_LAB_START -->
+            <localfile>
+              <log_format>eventchannel</log_format>
+              <location>Application</location>
+            </localfile>
+            <localfile>
+              <log_format>eventchannel</log_format>
+              <location>Security</location>
+            </localfile>
+            <localfile>
+              <log_format>eventchannel</log_format>
+              <location>System</location>
+            </localfile>
+            <localfile>
+              <log_format>eventchannel</log_format>
+              <location>Directory Service</location>
+            </localfile>
+            <localfile>
+              <log_format>syslog</log_format>
+              <location>$DemoDir\Logs\ad-demo.log</location>
+            </localfile>
+            <syscheck>
+              <disabled>no</disabled>
+              <frequency>300</frequency>
+              <scan_on_start>yes</scan_on_start>
+              <alert_new_files>yes</alert_new_files>
+              <directories realtime="yes" report_changes="yes">$DemoDir\Confidential</directories>
+            </syscheck>
+            <!-- ANSIBLE_WINDOWS_AD_LAB_END -->
+          "@
+
+          if (-not (Test-Path $AgentConfig)) {
+            throw "Wazuh agent config not found at $AgentConfig"
+          }
+
+          $Config = Get-Content -Path $AgentConfig -Raw
+          if ($Config -notmatch "ANSIBLE_WINDOWS_AD_LAB_START") {
+            $Config = $Config -replace "</ossec_config>", "$Block`r`n</ossec_config>"
+            Set-Content -Path $AgentConfig -Value $Config -Encoding ASCII
+          }
+
+    - name: Copy safe AD demo event generator
+      ansible.windows.win_copy:
+        src: ../files/Generate-ADDemoEvents.ps1
+        dest: "{{ wazuh_demo_dir }}\\Generate-ADDemoEvents.ps1"
+
+    - name: Ensure Wazuh service is running
+      ansible.windows.win_service:
+        name: WazuhSvc
+        start_mode: auto
+        state: restarted
+
+    - name: Generate initial safe demo evidence
+      ansible.windows.win_shell: |
+        powershell.exe -NoLogo -ExecutionPolicy Bypass -File "{{ wazuh_demo_dir }}\Generate-ADDemoEvents.ps1" -DemoDir "{{ wazuh_demo_dir }}" -DomainName "{{ ad_domain_fqdn }}"
+      when: run_demo_events_after_setup | bool

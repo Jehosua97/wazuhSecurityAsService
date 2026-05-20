@@ -1,0 +1,62 @@
+---
+windows_hostname: "ad2016-dc01"
+windows_administrator_password: "ChangeMe!2026"
+
+ad_domain_fqdn: "corp.demo.local"
+ad_domain_netbios: "CORPDEMO"
+ad_base_dn: "DC=corp,DC=demo,DC=local"
+ad_safe_mode_password: "ChangeMe!2026"
+ad_users_ou_name: "DemoUsers"
+ad_groups_ou_name: "DemoGroups"
+ad_service_accounts_ou_name: "ServiceAccounts"
+
+wazuh_manager_ip: "34.135.112.15"
+wazuh_agent_name: "ad2016-dc01"
+wazuh_agent_version: "4.13.0-1"
+wazuh_demo_dir: "C:\\AD-Demo"
+run_demo_events_after_setup: true
+
+ad_groups:
+  - name: "Finance Users"
+    description: "Demo finance users"
+  - name: "Operations Users"
+    description: "Demo operations users"
+  - name: "SOC Analysts"
+    description: "Demo SOC analysts"
+  - name: "Privileged Admins"
+    description: "Demo privileged administrators"
+
+ad_users:
+  - username: "ana.garcia"
+    firstname: "Ana"
+    surname: "Garcia"
+    password: "ChangeMe!2026"
+    groups:
+      - "Finance Users"
+  - username: "carlos.mendez"
+    firstname: "Carlos"
+    surname: "Mendez"
+    password: "ChangeMe!2026"
+    groups:
+      - "Operations Users"
+  - username: "sofia.ramirez"
+    firstname: "Sofia"
+    surname: "Ramirez"
+    password: "ChangeMe!2026"
+    groups:
+      - "Finance Users"
+      - "Operations Users"
+  - username: "it.soc"
+    firstname: "IT"
+    surname: "SOC"
+    password: "ChangeMe!2026"
+    groups:
+      - "SOC Analysts"
+      - "Privileged Admins"
+
+ad_service_accounts:
+  - username: "svc.backup"
+    firstname: "Service"
+    surname: "Backup"
+    password: "ChangeMe!2026"
+    description: "Demo backup service account"

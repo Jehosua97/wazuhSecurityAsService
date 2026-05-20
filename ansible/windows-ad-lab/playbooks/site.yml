@@ -1,0 +1,5 @@
+---
+- import_playbook: 00-validate-inputs.yml
+- import_playbook: 01-bootstrap-windows.yml
+- import_playbook: 02-promote-domain-controller.yml
+- import_playbook: 03-configure-ad-users-and-wazuh.yml
