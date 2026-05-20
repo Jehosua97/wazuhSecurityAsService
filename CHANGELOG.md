@@ -9,6 +9,8 @@
 - Agregado `demo-mode/reset_demo.sh` para revertir artefactos temporales.
 - Agregada documentacion operativa en `demo-mode/README.md`.
 - Creada carpeta `ansible/windows-ad-lab/` con Vagrantfile, inventario, playbooks Ansible, variables de ejemplo y generador seguro de eventos para Windows Server 2016 + Active Directory + Wazuh Agent.
+- Agregada demo de modulos del agente Wazuh en contenedores Linux: log collector, command, FIM, SCA, syscollector, rootcheck, active response seguro, Docker listener, cloud demo y vulnerability detection.
+- Agregado dashboard `SOC Modulos Wazuh - Demo tecnico` y documentacion `docs/wazuh-agent-modules-demo.md`.
 
 ### Fixed
 

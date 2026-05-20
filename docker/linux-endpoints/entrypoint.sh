@@ -38,19 +38,32 @@ wait_for_manager() {
 append_ossec_config() {
     local marker="$1"
     local body="$2"
+    local config="/var/ossec/etc/ossec.conf"
 
-    if [ ! -f /var/ossec/etc/ossec.conf ]; then
+    if [ ! -f "$config" ]; then
         echo "Wazuh agent config not found yet; skipping marker $marker"
         return 0
     fi
 
-    if ! grep -q "$marker" /var/ossec/etc/ossec.conf; then
-        cat >>/var/ossec/etc/ossec.conf <<EOF
+    if grep -q "<!-- $marker START -->" "$config"; then
+        python3 - "$config" "$marker" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+marker = re.escape(sys.argv[2])
+text = path.read_text()
+pattern = rf"\n?<!-- {marker} START -->.*?<!-- {marker} END -->\n?"
+path.write_text(re.sub(pattern, "\n", text, flags=re.S))
+PYEOF
+    fi
+
+    cat >>"$config" <<EOF
 <!-- $marker START -->
 $body
 <!-- $marker END -->
 EOF
-    fi
 }
 
 ensure_wazuh_runtime_identity() {
@@ -78,6 +91,292 @@ ensure_wazuh_runtime_identity() {
             useradd -r -g wazuh -d /var/ossec -s /usr/sbin/nologin wazuh || true
         fi
     fi
+}
+
+write_module_demo_event() {
+    local module="$1"
+    local action="$2"
+    local detail="$3"
+
+    write_syslog_line "/var/log/wazuh-agent-modules-demo.log" "$WAZUH_AGENT_NAME" "wazuh-module-demo" "module=$module action=$action detail=$detail"
+}
+
+provision_agent_module_demo() {
+    mkdir -p /opt/wazuh-module-demo/evidence /opt/wazuh-module-demo/config /var/ossec/etc/shared /var/ossec/active-response/bin
+    ensure_log /var/log/wazuh-agent-modules-demo.log
+    ensure_log /var/log/cloud-gcp-demo.log
+
+    cat >/opt/wazuh-module-demo/config/module-baseline.conf <<EOF
+endpoint=$WAZUH_AGENT_NAME
+profile=$PROFILE
+manager=$WAZUH_MANAGER_IP
+log_collector=enabled
+command_execution=enabled_local_only
+fim=enabled
+sca=enabled
+syscollector=enabled
+rootcheck=enabled
+active_response=enabled_safe_evidence_only
+container_security=$([ "$PROFILE" = "docker-host" ] && echo "docker_listener_enabled" || echo "not_applicable")
+cloud_security=simulated_log_only
+EOF
+
+    cat >/usr/local/bin/wazuh-demo-command-disk.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+usage="$(df -P / | awk 'NR==2 {print $5}')"
+available="$(df -P / | awk 'NR==2 {print $4}')"
+echo "module=command action=disk_space_check filesystem=/ usage=$usage available_kb=$available"
+EOF
+    chmod +x /usr/local/bin/wazuh-demo-command-disk.sh
+
+    cat >/usr/local/bin/wazuh-demo-command-users.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+count="$(awk -F: '$3 >= 1000 && $1 != "nobody" {c++} END {print c+0}' /etc/passwd)"
+echo "module=command action=local_user_inventory users=$count"
+EOF
+    chmod +x /usr/local/bin/wazuh-demo-command-users.sh
+
+    cat >/usr/local/bin/wazuh-demo-generate-module-events.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODULE_LOG="/var/log/wazuh-agent-modules-demo.log"
+CLOUD_LOG="/var/log/cloud-gcp-demo.log"
+EVIDENCE_DIR="/opt/wazuh-module-demo/evidence"
+CONFIG_FILE="/opt/wazuh-module-demo/config/module-baseline.conf"
+HOST="$(hostname)"
+
+mkdir -p "$EVIDENCE_DIR" "$(dirname "$CONFIG_FILE")"
+touch "$MODULE_LOG" "$CLOUD_LOG" "$CONFIG_FILE"
+
+emit() {
+    local module="$1"
+    local action="$2"
+    local detail="$3"
+    printf '%s %s wazuh-module-demo: module=%s action=%s detail=%s\n' "$(date '+%b %e %H:%M:%S')" "$HOST" "$module" "$action" "$detail" >> "$MODULE_LOG"
+}
+
+emit_cloud() {
+    local action="$1"
+    local detail="$2"
+    printf '%s %s gcp-demo: module=cloud_security action=%s detail=%s\n' "$(date '+%b %e %H:%M:%S')" "$HOST" "$action" "$detail" >> "$CLOUD_LOG"
+}
+
+emit log_collector app_log_ingested "source=/var/log/wazuh-agent-modules-demo.log"
+emit command local_command_output "script=/usr/local/bin/wazuh-demo-command-disk.sh"
+emit fim baseline_file_changed "file=$CONFIG_FILE"
+emit sca policy_expected "policy=/var/ossec/etc/shared/wazuh_demo_sca.yml"
+emit syscollector inventory_scan_expected "tables=packages,ports,processes,network"
+emit malware_detection rootcheck_scan_expected "safe_demo=no_malware_created"
+emit vulnerability_detection manager_uses_inventory "source=syscollector_packages"
+emit active_response trigger_safe_response "response=module-demo-response evidence_only=true"
+emit container_security docker_listener_expected "profile=docker-host socket=/var/run/docker.sock"
+emit_cloud iam_policy_change "project=wazuh-iac-on-gcp resource=demo-service-account outcome=simulated"
+emit_cloud compute_instance_stop "project=wazuh-iac-on-gcp instance=legacy-demo-vm outcome=simulated"
+
+{
+    echo "last_module_demo_run=$(date -Is)"
+    echo "host=$HOST"
+} >> "$CONFIG_FILE"
+
+cat >"$EVIDENCE_DIR/module-demo-$(date +%Y%m%d%H%M%S).json" <<JSON
+{
+  "timestamp": "$(date -Is)",
+  "host": "$HOST",
+  "scope": "safe-demo",
+  "modules": [
+    "log_collector",
+    "command",
+    "fim",
+    "sca",
+    "syscollector",
+    "malware_detection_rootcheck",
+    "active_response",
+    "container_security",
+    "cloud_security",
+    "vulnerability_detection"
+  ],
+  "note": "No exploitation, malware, persistence or third-party activity was performed."
+}
+JSON
+
+echo "Safe Wazuh module demo events generated."
+EOF
+    chmod +x /usr/local/bin/wazuh-demo-generate-module-events.sh
+
+    cat >/var/ossec/active-response/bin/module-demo-response.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+EVIDENCE_DIR="/opt/wazuh-module-demo/evidence"
+MODULE_LOG="/var/log/wazuh-agent-modules-demo.log"
+mkdir -p "$EVIDENCE_DIR"
+
+payload="$(cat || true)"
+stamp="$(date -Is)"
+evidence_file="$EVIDENCE_DIR/active-response-$stamp.json"
+
+cat >"$evidence_file" <<JSON
+{
+  "timestamp": "$stamp",
+  "action": "module-demo-response",
+  "mode": "evidence-only",
+  "payload": $(printf '%s' "$payload" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+}
+JSON
+
+printf '%s %s wazuh-module-demo: module=active_response action=evidence_collected detail=file=%s\n' "$(date '+%b %e %H:%M:%S')" "$(hostname)" "$evidence_file" >> "$MODULE_LOG"
+exit 0
+EOF
+    chmod 750 /var/ossec/active-response/bin/module-demo-response.sh
+
+    cat >/var/ossec/etc/shared/wazuh_demo_sca.yml <<'EOF'
+policy:
+  id: "wazuh_demo_agent_modules"
+  file: "wazuh_demo_sca.yml"
+  name: "Wazuh demo - Agent module baseline"
+  description: "Safe checks for the local Docker Wazuh module demonstration."
+  references:
+    - "https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/"
+
+requirements:
+  title: "Linux endpoint"
+  description: "Run only when the endpoint exposes os-release."
+  condition: all
+  rules:
+    - "f:/etc/os-release"
+
+checks:
+  - id: 100001
+    title: "Demo module baseline file exists"
+    description: "The endpoint has the controlled module baseline file used for FIM and reporting."
+    rationale: "The demo must be deterministic and auditable."
+    remediation: "Recreate the container with scripts/lab-master.ps1 -Action start-linux."
+    condition: all
+    rules:
+      - "f:/opt/wazuh-module-demo/config/module-baseline.conf"
+
+  - id: 100002
+    title: "Demo module event log exists"
+    description: "The endpoint has a controlled log source for Wazuh module visibility."
+    rationale: "Log collection must be visible in the dashboard."
+    remediation: "Run /usr/local/bin/wazuh-demo-generate-module-events.sh."
+    condition: all
+    rules:
+      - "f:/var/log/wazuh-agent-modules-demo.log"
+
+  - id: 100003
+    title: "No demo secrets file is present"
+    description: "The demo endpoint must not include a fake secret file outside evidence paths."
+    rationale: "Avoid normalizing insecure credential placement."
+    remediation: "Remove /opt/wazuh-module-demo/config/demo-secret.txt if present."
+    condition: none
+    rules:
+      - "f:/opt/wazuh-module-demo/config/demo-secret.txt"
+EOF
+}
+
+configure_common_wazuh_modules() {
+    append_ossec_config "LOCAL_DOCKER_WAZUH_AGENT_MODULES" '<ossec_config>
+  <labels>
+    <label key="lab">wazuh-security-mvp</label>
+    <label key="lab_profile">'$PROFILE'</label>
+    <label key="module_catalog">agent-modules-demo</label>
+  </labels>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/wazuh-agent-modules-demo.log</location>
+  </localfile>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/cloud-gcp-demo.log</location>
+  </localfile>
+
+  <wodle name="command">
+    <disabled>no</disabled>
+    <tag>wazuh_demo_disk</tag>
+    <command>/usr/local/bin/wazuh-demo-command-disk.sh</command>
+    <interval>2m</interval>
+    <run_on_start>yes</run_on_start>
+    <timeout>10</timeout>
+  </wodle>
+  <wodle name="command">
+    <disabled>no</disabled>
+    <tag>wazuh_demo_users</tag>
+    <command>/usr/local/bin/wazuh-demo-command-users.sh</command>
+    <interval>5m</interval>
+    <run_on_start>yes</run_on_start>
+    <timeout>10</timeout>
+  </wodle>
+
+  <wodle name="syscollector">
+    <disabled>no</disabled>
+    <interval>10m</interval>
+    <scan_on_start>yes</scan_on_start>
+    <hardware>yes</hardware>
+    <os>yes</os>
+    <network>yes</network>
+    <packages>yes</packages>
+    <ports all="yes">yes</ports>
+    <processes>yes</processes>
+    <synchronization>
+      <max_eps>10</max_eps>
+    </synchronization>
+  </wodle>
+
+  <sca>
+    <enabled>yes</enabled>
+    <scan_on_start>yes</scan_on_start>
+    <interval>6h</interval>
+    <skip_nfs>yes</skip_nfs>
+    <policies>
+      <policy>/var/ossec/etc/shared/wazuh_demo_sca.yml</policy>
+    </policies>
+  </sca>
+
+  <rootcheck>
+    <disabled>no</disabled>
+    <check_files>yes</check_files>
+    <check_trojans>yes</check_trojans>
+    <check_dev>yes</check_dev>
+    <check_sys>yes</check_sys>
+    <check_pids>yes</check_pids>
+    <check_ports>yes</check_ports>
+    <check_if>yes</check_if>
+    <frequency>3600</frequency>
+    <rootkit_files>/var/ossec/etc/shared/rootkit_files.txt</rootkit_files>
+    <rootkit_trojans>/var/ossec/etc/shared/rootkit_trojans.txt</rootkit_trojans>
+    <skip_nfs>yes</skip_nfs>
+  </rootcheck>
+
+  <active-response>
+    <disabled>no</disabled>
+    <repeated_offenders>1,5,10</repeated_offenders>
+  </active-response>
+</ossec_config>'
+}
+
+configure_docker_listener_module() {
+    if [ "$PROFILE" != "docker-host" ]; then
+        return 0
+    fi
+
+    if [ ! -e /var/run/docker.sock ]; then
+        write_module_demo_event "container_security" "docker_socket_missing" "mount=/var/run/docker.sock"
+        return 0
+    fi
+
+    append_ossec_config "LOCAL_DOCKER_WAZUH_DOCKER_LISTENER" '<ossec_config>
+  <wodle name="docker-listener">
+    <disabled>no</disabled>
+    <interval>2m</interval>
+    <attempts>5</attempts>
+    <run_on_start>yes</run_on_start>
+  </wodle>
+</ossec_config>'
 }
 
 install_wazuh_agent() {
@@ -382,6 +681,7 @@ configure_pyme_demo_target() {
     <alert_new_files>yes</alert_new_files>
     <directories realtime="yes" report_changes="yes">/opt/pyme-compliance</directories>
     <directories realtime="yes" report_changes="yes">/var/www/panel</directories>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-module-demo</directories>
     <directories realtime="yes">/opt/lab-share</directories>
   </syscheck>
 </ossec_config>'
@@ -450,6 +750,7 @@ configure_metasploit_node() {
     <scan_on_start>yes</scan_on_start>
     <alert_new_files>yes</alert_new_files>
     <directories realtime="yes" report_changes="yes">/opt/metasploit-lab</directories>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
@@ -523,6 +824,7 @@ configure_edge_gateway() {
     <alert_new_files>yes</alert_new_files>
     <directories realtime="yes" report_changes="yes">/etc/wireguard</directories>
     <directories realtime="yes" report_changes="yes">/opt/gateway-lab</directories>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
@@ -597,6 +899,7 @@ configure_db_server() {
     <alert_new_files>yes</alert_new_files>
     <directories realtime="yes" report_changes="yes">/etc/mysql</directories>
     <directories realtime="yes" report_changes="yes">/opt/db-lab</directories>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
@@ -650,6 +953,7 @@ configure_docker_host() {
     <alert_new_files>yes</alert_new_files>
     <directories realtime="yes" report_changes="yes">/opt/docker-lab</directories>
     <directories realtime="yes" report_changes="yes">/etc/docker</directories>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
@@ -758,11 +1062,14 @@ configure_linux_ui_workstation() {
     <alert_new_files>yes</alert_new_files>
     <auto_ignore frequency="10" timeframe="3600">no</auto_ignore>
     <directories realtime="yes" report_changes="yes" check_all="yes">/Confidencial</directories>
+    <directories realtime="yes" report_changes="yes" check_all="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
 
 run_initial_events() {
+    /usr/local/bin/wazuh-demo-generate-module-events.sh || true
+
     case "$PROFILE" in
         pyme-demo-target) /usr/local/bin/pyme-demo-generate-events.sh || true ;;
         metasploit-node) /usr/local/bin/metasploit-demo-generate-events.sh || true ;;
@@ -816,9 +1123,13 @@ case "$PROFILE" in
         ;;
 esac
 
+provision_agent_module_demo
+configure_common_wazuh_modules
+configure_docker_listener_module
+
 start_wazuh_agent
 run_initial_events
 
 echo "Endpoint $WAZUH_AGENT_NAME is ready."
 touch /var/ossec/logs/ossec.log /var/log/apache2/access.log /var/log/apache2/error.log || true
-tail -F "$STARTUP_LOG" /var/ossec/logs/ossec.log /var/log/auth.log /var/log/syslog /var/log/kern.log 2>/dev/null
+tail -F "$STARTUP_LOG" /var/ossec/logs/ossec.log /var/log/auth.log /var/log/syslog /var/log/kern.log /var/log/wazuh-agent-modules-demo.log /var/log/cloud-gcp-demo.log 2>/dev/null

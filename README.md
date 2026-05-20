@@ -81,6 +81,7 @@ Construir una plataforma mínima viable que permita:
 - `dashboards/wazuh-soc-dashboards.ndjson`: dashboards importables a Wazuh/OpenSearch Dashboards.
 - `demo-mode/`: scripts seguros para generar eventos controlados y evidencia local de demo.
 - `ansible/windows-ad-lab`: laboratorio Windows Server 2016 con Active Directory, usuarios demo y agente Wazuh para correr en otra PC con VirtualBox/Vagrant.
+- `docs/wazuh-agent-modules-demo.md`: demo documentada de modulos del agente Wazuh dentro de los contenedores Linux.
 - `scripts/lab-master.ps1`: consola maestra para operar GCP, Wazuh y contenedores.
 - `scripts/local-docker-lab.ps1`: operación directa de endpoints Docker.
 - `scripts/apply-wazuh-config.ps1`: aplica reglas, listas y configuración Wazuh al manager.
@@ -502,6 +503,7 @@ Documentos existentes:
 - `docs/soc-dashboard-queries.md`
 - `docs/soc-mvp-playbook.md`
 - `docs/wazuh-soc-dashboards.md`
+- `docs/wazuh-agent-modules-demo.md`
 
 Documentos por crear:
 

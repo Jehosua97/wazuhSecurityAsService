@@ -36,6 +36,14 @@ sudo sed -i 's/\r$//' "$WAZUH_ETC_DIR/lists/alienvault_reputation.ipset"
 
 sudo docker exec -i $CONTAINER_ID mkdir -p /opt/tools
 sudo docker cp /tmp/wazuh-manager/opt/tools/iplist-to-cdblist.py $CONTAINER_ID:/opt/tools/iplist-to-cdblist.py
+
+if [ -d /tmp/wazuh-manager/active-response/bin ]; then
+    sudo docker exec -i $CONTAINER_ID mkdir -p /var/ossec/active-response/bin
+    sudo find /tmp/wazuh-manager/active-response/bin -maxdepth 1 -type f \
+        -exec sudo docker cp {} $CONTAINER_ID:/var/ossec/active-response/bin/ \;
+    sudo docker exec -i $CONTAINER_ID chmod 750 /var/ossec/active-response/bin/module-demo-response.sh || true
+fi
+
 # Convert ipset to CDB list
 sudo docker exec -i $CONTAINER_ID /var/ossec/framework/python/bin/python3 /opt/tools/iplist-to-cdblist.py \
     /var/ossec/etc/lists/alienvault_reputation.ipset \
@@ -47,6 +55,7 @@ sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/rules/local_r
 sudo docker exec -i $CONTAINER_ID chown -R wazuh:wazuh /var/ossec/etc/decoders
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/lists/alienvault_reputation.ipset
 sudo docker exec -i $CONTAINER_ID chown wazuh:wazuh /var/ossec/etc/lists/blacklist-alienvault
+sudo docker exec -i $CONTAINER_ID chown root:wazuh /var/ossec/active-response/bin/module-demo-response.sh || true
 
 # Restart Wazuh controller
 sudo docker exec -i $CONTAINER_ID /var/ossec/bin/wazuh-control restart

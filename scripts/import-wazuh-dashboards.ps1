@@ -251,6 +251,48 @@ $savedObjects = @(
         -Description "DLP/FIM, ransomware, autenticacion critica y port scan del endpoint Linux UI." `
         -Query 'rule.id: (100010 or 100015 or 100020 or 100030) or rule.groups: linux_ui_endpoint'),
 
+    (New-WazuhSearchObject `
+        -Id "soc-modules-overview" `
+        -Title "SOC Modulos Wazuh - Vista general" `
+        -Description "Eventos de visibilidad por modulo del agente Wazuh en los contenedores demo." `
+        -Query 'rule.groups: wazuh_module_visibility or rule.groups: sca or rule.groups: syscheck or rule.groups: rootcheck or rule.groups: docker' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-modules-log-command" `
+        -Title "SOC Modulos Wazuh - Log collector y Command" `
+        -Description "Log collector y comandos autorizados ejecutados localmente por el agente." `
+        -Query 'rule.groups: (wazuh_agent_logcollector or wazuh_agent_command)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-modules-fim-sca" `
+        -Title "SOC Modulos Wazuh - FIM y SCA" `
+        -Description "Cambios de archivos, baseline de modulos y evaluacion de configuracion." `
+        -Query 'rule.groups: (wazuh_agent_fim or wazuh_agent_sca or syscheck or sca)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "syscheck.path", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-modules-inventory-vuln-rootcheck" `
+        -Title "SOC Modulos Wazuh - Inventario, vulnerabilidades y malware detection" `
+        -Description "Syscollector, vulnerability detection y rootcheck/malware detection para narrativa de riesgo." `
+        -Query 'rule.groups: (wazuh_agent_syscollector or wazuh_agent_vulnerability_detection or wazuh_agent_rootcheck or rootcheck or vulnerability_management)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-modules-active-response" `
+        -Title "SOC Modulos Wazuh - Active Response seguro" `
+        -Description "Respuesta activa en modo evidencia: sin bloqueo ni acciones destructivas." `
+        -Query 'rule.groups: wazuh_agent_active_response' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-modules-container-cloud" `
+        -Title "SOC Modulos Wazuh - Contenedores y Cloud" `
+        -Description "Docker listener en docker-host y telemetria cloud GCP simulada de forma segura." `
+        -Query 'rule.groups: (wazuh_agent_container_security or docker or wazuh_agent_cloud_security or cloud_security)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
     (New-WazuhDashboardObject `
         -Id "soc-ejecutivo-dashboard" `
         -Title "SOC Ejecutivo - PYME Mexico" `
@@ -276,6 +318,19 @@ $savedObjects = @(
             [ordered]@{ searchId = "soc-ops-docker-host"; x = 0;  y = 36; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-ops-windows-server"; x = 24; y = 36; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-ops-linux-ui-sensitive"; x = 0; y = 48; w = 48; h = 12 }
+        )),
+
+    (New-WazuhDashboardObject `
+        -Id "soc-modulos-wazuh-dashboard" `
+        -Title "SOC Modulos Wazuh - Demo tecnico" `
+        -Description "Dashboard para demostrar los modulos del agente Wazuh en los contenedores locales." `
+        -Panels @(
+            [ordered]@{ searchId = "soc-modules-overview"; x = 0;  y = 0;  w = 48; h = 12 },
+            [ordered]@{ searchId = "soc-modules-log-command"; x = 0;  y = 12; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-modules-fim-sca"; x = 24; y = 12; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-modules-inventory-vuln-rootcheck"; x = 0;  y = 24; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-modules-active-response"; x = 24; y = 24; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-modules-container-cloud"; x = 0;  y = 36; w = 48; h = 12 }
         ))
 )
 
@@ -336,3 +391,4 @@ if (-not $DashboardBaseUrl) {
 
 Write-Host "Executive dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-ejecutivo-dashboard"
 Write-Host "Operational dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-operativo-dashboard"
+Write-Host "Wazuh modules dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-modulos-wazuh-dashboard"

@@ -6,6 +6,7 @@ Este documento acompana el import de dos dashboards para tu instancia actual de 
 
 - `SOC Ejecutivo - PYME Mexico`
 - `SOC Operativo - PYME Mexico`
+- `SOC Modulos Wazuh - Demo tecnico`
 
 Los dashboards se crean como saved objects de OpenSearch Dashboards y se importan sobre el data view `wazuh-alerts-*`.
 
@@ -36,6 +37,7 @@ Y agrega:
 
 - Ejecutivo: `/app/dashboards#/view/soc-ejecutivo-dashboard`
 - Operativo: `/app/dashboards#/view/soc-operativo-dashboard`
+- Modulos Wazuh: `/app/dashboards#/view/soc-modulos-wazuh-dashboard`
 
 ## Dashboard Ejecutivo
 
@@ -61,6 +63,19 @@ Paneles:
 - Actividad de `edge-gateway`
 - Actividad de `db-server`
 - Actividad de `docker-host`
+
+## Dashboard Modulos Wazuh
+
+Pensado para explicar capacidades del agente Wazuh durante una demo tecnica.
+
+Paneles:
+
+- Vista general de modulos
+- Log collector y Command
+- FIM y SCA
+- Inventario, vulnerabilidades y malware detection
+- Active Response seguro
+- Contenedores y Cloud
 
 ## Queries base
 

@@ -119,6 +119,39 @@ docker compose -f docker-compose.endpoints.yml exec metasploit-node nmap -Pn -sS
 docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/linux-ui-demo-portscan-log.sh
 ```
 
+## Demo de modulos del agente Wazuh
+
+Los contenedores Linux tambien incluyen una demo especifica de modulos del agente:
+
+- Log collector
+- Command execution
+- FIM
+- SCA
+- System inventory
+- Malware detection / Rootcheck
+- Active Response seguro
+- Container security monitoring
+- Cloud security monitoring simulado
+- Vulnerability Detection usando inventario del agente
+
+Generar eventos de modulos:
+
+```powershell
+docker compose -f docker-compose.endpoints.yml exec pyme-demo-target /usr/local/bin/wazuh-demo-generate-module-events.sh
+docker compose -f docker-compose.endpoints.yml exec docker-host /usr/local/bin/wazuh-demo-generate-module-events.sh
+docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/wazuh-demo-generate-module-events.sh
+```
+
+Dashboard:
+
+```text
+SOC Modulos Wazuh - Demo tecnico
+```
+
+Documentacion completa:
+
+- `docs/wazuh-agent-modules-demo.md`
+
 ## Operacion diaria
 
 Apagar contenedores sin perder datos del agente:
@@ -163,4 +196,10 @@ Windows:
 
 ```text
 agent.name: "windows-server" and rule.groups: windows_endpoint
+```
+
+Modulos Wazuh:
+
+```text
+rule.groups: wazuh_module_visibility
 ```

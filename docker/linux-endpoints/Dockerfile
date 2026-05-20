@@ -21,6 +21,8 @@ RUN apt-get update && \
       openssl \
       procps \
       python3 \
+      python3-docker \
+      python-is-python3 \
       rsyslog \
       sudo \
       tmux \
