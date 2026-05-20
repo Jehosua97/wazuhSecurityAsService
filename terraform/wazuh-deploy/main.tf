@@ -54,7 +54,9 @@ resource "google_compute_instance" "wazuh_server" {
   network_interface {
     network    = google_compute_network.vpc_wazuh.self_link
     subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
-    access_config {}
+    access_config {
+      nat_ip = google_compute_address.wazuh_server_public_ip.address
+    }
   }
 
   tags = ["wazuh-manager", "managed-siem"]
@@ -377,9 +379,7 @@ resource "google_compute_instance" "linux_ui_workstation" {
   network_interface {
     network    = google_compute_network.vpc_wazuh.self_link
     subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
-    access_config {
-      nat_ip = google_compute_address.wazuh_server_public_ip.address
-    }
+    access_config {}
   }
 
   tags = ["linux-ui-endpoint", "desktop-endpoint", "sensitive-data-lab"]
@@ -416,9 +416,7 @@ resource "google_compute_instance" "windows_server" {
   network_interface {
     network    = google_compute_network.vpc_wazuh.self_link
     subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
-    access_config {
-      nat_ip = google_compute_address.wazuh_server_public_ip.address
-    }
+    access_config {}
   }
 
   tags = ["windows-endpoint", "managed-windows"]

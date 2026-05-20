@@ -33,60 +33,91 @@ Construir una plataforma mínima viable que permita:
 
 ## Arquitectura general
 
+Estado actual validado: Wazuh vive en GCP como plano central de monitoreo, mientras que el ambiente tipo cliente vive principalmente en Docker local. Los endpoints GCP antiguos existen como opcion Terraform, pero para el MVP comercial actual se recomienda mantener `enable_gcp_endpoints = false` y operar los endpoints locales con Docker.
+
 ```text
                          Equipo SOC / Demo
-                    PowerShell, Terraform, Docker
+             PowerShell + Terraform + Docker + Git Bash/WSL
                                 |
+                                | aplica config, importa dashboards,
+                                | arranca/detiene laboratorio
                                 v
-+-------------------------------+--------------------------------+
-|                         Google Cloud Platform                   |
-|                                                                 |
-|  +-------------------------+     +----------------------------+  |
-|  | wazuh-server            |     | Firewall / IAM / Backups    |  |
-|  | Wazuh Manager           |<----| Acceso restringido por IP   |  |
-|  | Wazuh Indexer           |     | Estado Terraform en GCS     |  |
-|  | Wazuh Dashboard         |     +----------------------------+  |
-|  +-------------------------+                                      |
-|         ^            ^                                            |
-|         | 1514/1515  | HTTPS                                      |
-+---------|------------|--------------------------------------------+
-          |            |
-          |            v
-+---------|--------------------------------------------------------+
-|         |                 Laptop / Ambiente Demo Local            |
-|         |                                                        |
-|  +------+-------------------+                                    |
-|  | Docker Compose           |                                    |
-|  | wazuh-local-endpoints    |                                    |
-|  +--------------------------+                                    |
-|    | pyme-demo-target        -> Web app, Apache, Juice Shop proxy |
-|    | db-server               -> MariaDB y logs de acceso          |
-|    | edge-gateway            -> firewall/VPN simulado             |
-|    | docker-host             -> eventos de contenedores           |
-|    | metasploit-node         -> endpoint de laboratorio controlado |
-|    | linux-ui-workstation    -> UI Linux, FIM, carpeta sensible   |
-|    | juice-shop              -> app vulnerable local de demo       |
-|                                                                    |
-+--------------------------------------------------------------------+
++------------------------------------------------------------------+
+|                       Google Cloud Platform                       |
+|                                                                  |
+|  +----------------------------+      +-------------------------+  |
+|  | wazuh-server               |      | Controles GCP           |  |
+|  | - Wazuh Manager            |<-----| - VPC y firewall        |  |
+|  | - Wazuh Indexer            |      | - IP publica estatica   |  |
+|  | - Wazuh Dashboard          |      | - Terraform state GCS   |  |
+|  | - Reglas custom            |      | - IAM / acceso admin    |  |
+|  | - Decoders/listas          |      +-------------------------+  |
+|  | - Active Response demo     |                                 |
+|  +----------------------------+                                 |
+|       ^        ^        ^                                       |
+|       |        |        |                                       |
+|       |        |        +-- HTTPS 443 / Dashboard               |
+|       |        +----------- API 55000 / gestion                 |
+|       +-------------------- 1514/1515 / agentes Wazuh           |
++-------|----------------------------------------------------------+
+        |
+        v
++------------------------------------------------------------------+
+|                  Laptop / Ambiente Demo Local                    |
+|                                                                  |
+|  Docker Compose: docker-compose.endpoints.yml                    |
+|                                                                  |
+|  +----------------------+     +--------------------------------+  |
+|  | Contenedores cliente |     | Demo mode / Evidencia          |  |
+|  | - linux-ui-workstation|<---| - FIM controlado               |  |
+|  | - pyme-demo-target   |     | - permisos                     |  |
+|  | - edge-gateway       |     | - logs anomalos seguros        |  |
+|  | - db-server          |     | - servicio reiniciado simulado |
+|  | - docker-host        |     | - contenedor reiniciado sim.   |
+|  | - metasploit-node    |     | - bundle de evidencia          |
+|  | - juice-shop         |     +--------------------------------+  |
+|  +----------------------+                                         |
+|                                                                  |
+|  Modulos Wazuh en agentes Linux:                                 |
+|  - Log collector                                                 |
+|  - Command execution                                             |
+|  - FIM                                                           |
+|  - SCA                                                           |
+|  - System inventory                                              |
+|  - Rootcheck / malware detection seguro                          |
+|  - Active Response demo seguro                                   |
+|  - Docker monitoring en docker-host                              |
+|  - Cloud monitoring demo por logs GCP simulados                  |
++------------------------------------------------------------------+
+        |
+        v
++------------------------------------------------------------------+
+|                    Componentes opcionales                         |
+|  - docker-compose.windows.yml: Windows container demo             |
+|  - ansible/windows-ad-lab: Windows Server 2016 + AD en VirtualBox |
+|  - Endpoints GCP legacy via Terraform si enable_gcp_endpoints=true|
++------------------------------------------------------------------+
 ```
 
 ## Componentes actuales
 
-- `terraform/wazuh-deploy`: infraestructura GCP con Terraform.
-- `terraform/config/wazuh-manager`: configuración administrada del manager Wazuh.
-- `docker-compose.endpoints.yml`: endpoints Linux locales del laboratorio.
-- `docker-compose.windows.yml`: endpoint Windows opcional, requiere Docker Desktop en modo Windows containers.
-- `docker/linux-endpoints`: imagen base de endpoints Linux con agente Wazuh y scripts de demo.
-- `docker/windows-endpoint`: imagen base de Windows Server demo.
-- `dashboards/wazuh-soc-dashboards.ndjson`: dashboards importables a Wazuh/OpenSearch Dashboards.
+- `terraform/wazuh-deploy`: infraestructura GCP con Terraform para Wazuh single-node, red, firewall, IP publica estatica y outputs operativos.
+- `terraform/config/wazuh-manager`: configuracion administrada del manager Wazuh: reglas, decoders, listas, `ossec.conf`, herramientas y Active Response seguro de demo.
+- `docker-compose.endpoints.yml`: ambiente cliente local con endpoints Linux y `juice-shop`.
+- `docker-compose.windows.yml`: endpoint Windows opcional; requiere Docker Desktop en modo Windows containers.
+- `docker/linux-endpoints`: imagen base de endpoints Linux con agente Wazuh, perfiles por servicio, scripts de eventos y modulos del agente.
+- `docker/windows-endpoint`: imagen base de Windows Server demo para pruebas controladas.
+- `dashboards/wazuh-soc-dashboards.ndjson`: dashboards importables a Wazuh/OpenSearch Dashboards, incluyendo vista SOC y vista de modulos Wazuh.
 - `demo-mode/`: scripts seguros para generar eventos controlados y evidencia local de demo.
 - `ansible/windows-ad-lab`: laboratorio Windows Server 2016 con Active Directory, usuarios demo y agente Wazuh para correr en otra PC con VirtualBox/Vagrant.
-- `docs/wazuh-agent-modules-demo.md`: demo documentada de modulos del agente Wazuh dentro de los contenedores Linux.
+- `docs/wazuh-agent-modules-demo.md`: documentacion de modulos del agente Wazuh dentro de los contenedores Linux.
 - `scripts/lab-master.ps1`: consola maestra para operar GCP, Wazuh y contenedores.
-- `scripts/local-docker-lab.ps1`: operación directa de endpoints Docker.
-- `scripts/apply-wazuh-config.ps1`: aplica reglas, listas y configuración Wazuh al manager.
+- `scripts/local-docker-lab.ps1`: operacion directa de endpoints Docker.
+- `scripts/apply-wazuh-config.ps1`: aplica reglas, listas, decoders, Active Response y configuracion Wazuh al manager.
 - `scripts/import-wazuh-dashboards.ps1`: importa dashboards SOC al dashboard.
-- `docs/`: documentación técnica y playbooks actuales.
+- `scripts/setup-linux-ui-sensitive-agent.sh`: configura el escenario Linux UI con carpeta sensible `/Confidencial`.
+- `scripts/simulate-confidential-ransomware-burst.sh`: genera rafaga FIM segura para el escenario de ransomware heuristico.
+- `docs/`: documentacion tecnica, playbooks, runbooks y guias actuales.
 
 ## Componentes a desarrollar
 
@@ -206,6 +237,9 @@ wazuh-security-mvp/
 │   ├── linux-endpoints/
 │   └── windows-endpoint/
 ├── docs/
+├── demo-mode/
+├── ansible/
+│   └── windows-ad-lab/
 ├── scripts/
 ├── terraform/
 │   ├── config/
@@ -336,7 +370,144 @@ Entregables:
 - Controles internos.
 - Evidencia de operación.
 
+## Mapa rapido de scripts
+
+Esta es la seccion operativa principal para el equipo. Si alguien nuevo entra al repositorio, debe empezar por `scripts/lab-master.ps1`.
+
+### Comandos mas usados
+
+| Necesidad | Comando |
+| --- | --- |
+| Ver estado completo del lab | `.\scripts\lab-master.ps1 -Action status` |
+| Abrir menu interactivo | `.\scripts\lab-master.ps1 -Action menu` |
+| Encender Wazuh GCP y endpoints Linux | `.\scripts\lab-master.ps1 -Action full-start` |
+| Modo ahorro sin perder IP | `.\scripts\lab-master.ps1 -Action cost-saver` |
+| Encender solo Wazuh en GCP | `.\scripts\lab-master.ps1 -Action start-wazuh` |
+| Apagar solo Wazuh en GCP | `.\scripts\lab-master.ps1 -Action stop-wazuh` |
+| Encender endpoints Linux locales | `.\scripts\lab-master.ps1 -Action start-linux` |
+| Detener endpoints Linux locales | `.\scripts\lab-master.ps1 -Action stop-linux` |
+| Aplicar reglas/configuracion Wazuh | `.\scripts\lab-master.ps1 -Action configure-wazuh` |
+| Crear o actualizar infraestructura GCP | `.\scripts\lab-master.ps1 -Action apply-gcp` |
+| Destruir infraestructura GCP | `.\scripts\lab-master.ps1 -Action destroy-gcp` |
+| Borrar contenedores/volumenes Linux | `.\scripts\lab-master.ps1 -Action destroy-linux` |
+
+Notas:
+
+- `cost-saver` apaga la VM y detiene contenedores, pero mantiene la IP estatica reservada por Terraform. Es el comando recomendado para bajar costos sin romper agentes.
+- `destroy-gcp` es destructivo: elimina infraestructura de GCP y puede romper la continuidad de la demo.
+- `destroy-linux` es destructivo para volumenes locales de Docker; usarlo solo si se quiere reconstruir el lab desde cero.
+
+### Scripts PowerShell de operacion
+
+| Script | Para que sirve | Ejemplos |
+| --- | --- | --- |
+| `scripts/lab-master.ps1` | Consola maestra de GCP, Wazuh y Docker. | `-Action status`, `-Action full-start`, `-Action cost-saver` |
+| `scripts/local-docker-lab.ps1` | Operacion directa de Docker Compose para endpoints locales. | `-Scope Linux -Action up`, `-Scope Linux -Action logs -Follow` |
+| `scripts/apply-wazuh-config.ps1` | Copia reglas, decoders, listas, Active Response y `ossec.conf` al manager. | `.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"` |
+| `scripts/import-wazuh-dashboards.ps1` | Importa dashboards SOC y de modulos Wazuh. | `.\scripts\import-wazuh-dashboards.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a" -DashboardUser "admin" -DashboardPassword $env:WAZUH_DASHBOARD_PASSWORD` |
+
+Acciones disponibles en `local-docker-lab.ps1`:
+
+```powershell
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action up
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action status
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action logs -Follow
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action restart -Service pyme-demo-target
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action down
+.\scripts\local-docker-lab.ps1 -Scope Linux -Action destroy
+```
+
+Para Windows containers:
+
+```powershell
+.\scripts\local-docker-lab.ps1 -Scope Windows -Action up
+.\scripts\local-docker-lab.ps1 -Scope Windows -Action down
+```
+
+Requiere cambiar Docker Desktop a Windows containers.
+
+### Scripts de demo en el host
+
+Estos scripts viven en `demo-mode/` y se ejecutan desde Git Bash, WSL o Bash.
+
+| Script | Evento que genera | Contenedor principal |
+| --- | --- | --- |
+| `demo-mode/run_all_demo_events.sh` | Ejecuta todos los eventos demo en secuencia. | Varios |
+| `demo-mode/reset_demo.sh` | Limpia artefactos temporales de la demo. | Varios |
+| `demo-mode/01_fim_critical_file_change.sh` | Cambio en archivo critico monitoreado por FIM. | `linux-ui-workstation` |
+| `demo-mode/02_permission_change.sh` | Cambio de permisos en archivo de prueba. | `pyme-demo-target` |
+| `demo-mode/03_service_restart_event.sh` | Servicio detenido/reiniciado de forma simulada. | `pyme-demo-target` |
+| `demo-mode/04_container_lifecycle_event.sh` | Contenedor detenido/reiniciado de forma simulada. | `docker-host` |
+| `demo-mode/05_anomalous_logs.sh` | Logs anomalos no ofensivos. | `pyme-demo-target` |
+| `demo-mode/06_generate_report_evidence.sh` | Bundle de evidencia para reporte. | `pyme-demo-target` |
+
+Ejecucion rapida en Windows:
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" demo-mode/run_all_demo_events.sh
+& "C:\Program Files\Git\bin\bash.exe" demo-mode/reset_demo.sh
+```
+
+### Scripts instalados dentro de contenedores Linux
+
+Estos comandos corren dentro de los endpoints con `docker compose exec`.
+
+| Contenedor | Script interno | Para que sirve |
+| --- | --- | --- |
+| `pyme-demo-target` | `/usr/local/bin/pyme-demo-generate-events.sh` | Eventos del servicio web/cliente PYME. |
+| `pyme-demo-target` | `/usr/local/bin/wazuh-demo-generate-module-events.sh` | Eventos de modulos Wazuh: logcollector, command, FIM, SCA, inventory, rootcheck, AR, cloud demo. |
+| `edge-gateway` | `/usr/local/bin/gateway-demo-generate-events.sh` | Eventos de gateway/firewall/VPN simulado. |
+| `db-server` | `/usr/local/bin/db-demo-generate-events.sh` | Eventos de base de datos. |
+| `docker-host` | `/usr/local/bin/docker-demo-generate-events.sh` | Eventos de seguridad de contenedores. |
+| `metasploit-node` | `/usr/local/bin/metasploit-demo-generate-events.sh` | Eventos controlados del endpoint de laboratorio. |
+| `metasploit-node` | `/usr/local/bin/msf-lab-console` | Consola controlada del laboratorio Metasploit. |
+| `linux-ui-workstation` | `/usr/local/bin/simulate-confidential-ransomware-burst.sh` | Rafaga FIM segura sobre `/Confidencial`. |
+| `linux-ui-workstation` | `/usr/local/bin/linux-ui-demo-auth-failure.sh` | Intentos fallidos simulados contra usuario `esquivel`. |
+| `linux-ui-workstation` | `/usr/local/bin/linux-ui-demo-portscan-log.sh` | Log defensivo simulado para escenario de escaneo. |
+
+Ejemplos:
+
+```powershell
+$env:WAZUH_MANAGER_IP="34.135.112.15"
+docker compose -f docker-compose.endpoints.yml exec pyme-demo-target /usr/local/bin/wazuh-demo-generate-module-events.sh
+docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/simulate-confidential-ransomware-burst.sh
+docker compose -f docker-compose.endpoints.yml exec docker-host /usr/local/bin/docker-demo-generate-events.sh
+```
+
+### Scripts Linux auxiliares
+
+| Script | Uso |
+| --- | --- |
+| `scripts/setup-linux-ui-sensitive-agent.sh` | Prepara `/Confidencial` y configuracion local para el escenario Linux UI. |
+| `scripts/simulate-confidential-ransomware-burst.sh` | Version standalone del simulador de rafaga FIM/ransomware heuristico. |
+| `terraform/config/wazuh-manager/deploy.sh` | Script remoto que aplica configuracion dentro del manager Wazuh en GCP. Normalmente se invoca desde `apply-wazuh-config.ps1`. |
+| `terraform/config/wazuh-manager/active-response/bin/module-demo-response.sh` | Active Response seguro de demo para generar evidencia. |
+
+### Ansible Windows AD Lab
+
+El laboratorio Windows AD esta listo para otra PC con VirtualBox/Vagrant. No se ejecuta en esta maquina si no tienes VirtualBox.
+
+```powershell
+cd ansible\windows-ad-lab
+vagrant up
+ansible-playbook -i inventories\vagrant.yml playbooks\site.yml
+ansible-playbook -i inventories\vagrant.yml playbooks\04-run-demo-events.yml
+```
+
+Archivo principal: `ansible/windows-ad-lab/README.md`.
+
 ## Cómo ejecutar la demo
+
+Para operacion diaria usa el camino corto:
+
+```powershell
+.\scripts\lab-master.ps1 -Action full-start
+.\scripts\lab-master.ps1 -Action status
+& "C:\Program Files\Git\bin\bash.exe" demo-mode/run_all_demo_events.sh
+.\scripts\lab-master.ps1 -Action cost-saver
+```
+
+El resto de esta seccion deja el proceso detallado para reconstruir o preparar el ambiente desde cero.
 
 ### 1. Preparar credenciales locales
 
@@ -402,8 +573,18 @@ $env:WAZUH_DASHBOARD_PASSWORD = "CAMBIAR_EN_PASSWORD_MANAGER"
 
 ### 8. Generar eventos seguros de demo
 
+Opcion recomendada para una demo completa:
+
 ```powershell
+& "C:\Program Files\Git\bin\bash.exe" demo-mode/run_all_demo_events.sh
+```
+
+Eventos especificos dentro de contenedores:
+
+```powershell
+$env:WAZUH_MANAGER_IP="34.135.112.15"
 docker compose -f docker-compose.endpoints.yml exec pyme-demo-target /usr/local/bin/pyme-demo-generate-events.sh
+docker compose -f docker-compose.endpoints.yml exec pyme-demo-target /usr/local/bin/wazuh-demo-generate-module-events.sh
 docker compose -f docker-compose.endpoints.yml exec edge-gateway /usr/local/bin/gateway-demo-generate-events.sh
 docker compose -f docker-compose.endpoints.yml exec db-server /usr/local/bin/db-demo-generate-events.sh
 docker compose -f docker-compose.endpoints.yml exec docker-host /usr/local/bin/docker-demo-generate-events.sh
@@ -421,6 +602,8 @@ agent.name: "edge-gateway" and rule.groups: edge_gateway
 agent.name: "db-server" and rule.groups: database_endpoint
 agent.name: "docker-host" and rule.groups: docker_host
 agent.name: "pyme-demo-target"
+rule.groups: wazuh_module_visibility
+rule.id >= 100300 and rule.id <= 100315
 ```
 
 ## Operación con script maestro
