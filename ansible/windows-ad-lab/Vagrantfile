@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-WINDOWS_BOX = ENV.fetch("WINDOWS_BOX", "gusztavvargadr/windows-server-2016-standard")
+WINDOWS_BOX = ENV.fetch("WINDOWS_BOX", "StefanScherer/windows_2016")
 WINDOWS_HOSTNAME = ENV.fetch("WINDOWS_HOSTNAME", "ad2016-lab")
 WINDOWS_VM_NAME = ENV.fetch("WINDOWS_VM_NAME", "wazuh-ad2016-lab")
 WINDOWS_ADMIN_PASSWORD = ENV.fetch("WINDOWS_ADMIN_PASSWORD", "ChangeMe!2026")
@@ -12,6 +12,7 @@ Vagrant.configure("2") do |config|
   config.vm.box = WINDOWS_BOX
   config.vm.hostname = WINDOWS_HOSTNAME
   config.vm.communicator = "winrm"
+  config.vm.boot_timeout = 1800
 
   config.winrm.username = ENV.fetch("VAGRANT_WINRM_USER", "vagrant")
   config.winrm.password = ENV.fetch("VAGRANT_WINRM_PASSWORD", "vagrant")
