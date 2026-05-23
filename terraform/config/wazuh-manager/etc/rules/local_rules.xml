@@ -416,6 +416,13 @@
     <group>wazuh_module_visibility,wazuh_agent_active_response,active_response,evidence,soc_signal,executive_reporting,iso_27001_A.5.24,</group>
   </rule>
 
+  <rule id="100316" level="10">
+    <if_sid>100300</if_sid>
+    <match>module=active_response action=trigger_windows_safe_response</match>
+    <description>Wazuh module demo: Windows safe Active Response trigger requested; evidence-only action expected on the monitored endpoint.</description>
+    <group>wazuh_module_visibility,wazuh_agent_active_response,active_response,windows_endpoint,soc_signal,soc_correlation_seed,incident_priority_p3,executive_reporting,iso_27001_A.5.24,</group>
+  </rule>
+
   <rule id="100311" level="7">
     <if_sid>100300</if_sid>
     <match>module=container_security</match>
