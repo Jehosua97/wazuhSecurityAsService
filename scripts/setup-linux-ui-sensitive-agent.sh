@@ -7,12 +7,16 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-SENSITIVE_DIR="${SENSITIVE_DIR:-/Confidencial}"
+SENSITIVE_DIR="${SENSITIVE_DIR:-/home/esquivel/Confidencial}"
 CONFIG_FILE="${CONFIG_FILE:-/var/ossec/etc/ossec.conf}"
 ENABLE_FIREWALL_DROP="${ENABLE_FIREWALL_DROP:-yes}"
-DESKTOP_USER="${DESKTOP_USER:-${SUDO_USER:-}}"
+DESKTOP_USER="${DESKTOP_USER:-${SUDO_USER:-esquivel}}"
 
-if [ -z "$DESKTOP_USER" ] || [ "$DESKTOP_USER" = "root" ]; then
+if [ "$DESKTOP_USER" = "esquivel" ] && ! id "$DESKTOP_USER" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$DESKTOP_USER"
+fi
+
+if [ -z "$DESKTOP_USER" ] || [ "$DESKTOP_USER" = "root" ] || ! id "$DESKTOP_USER" >/dev/null 2>&1; then
     DESKTOP_USER="$(awk -F: '$3 >= 1000 && $3 < 60000 {print $1; exit}' /etc/passwd)"
 fi
 
@@ -32,6 +36,14 @@ echo "Preparing sensitive folder at $SENSITIVE_DIR"
 mkdir -p "$SENSITIVE_DIR"
 chown root:"$DESKTOP_USER" "$SENSITIVE_DIR" 2>/dev/null || chown root:root "$SENSITIVE_DIR"
 chmod 0770 "$SENSITIVE_DIR"
+
+if [ "$SENSITIVE_DIR" != "/Confidencial" ]; then
+    if [ -d /Confidencial ] && [ ! -L /Confidencial ]; then
+        cp -a /Confidencial/. "$SENSITIVE_DIR/" 2>/dev/null || true
+        rm -rf /Confidencial
+    fi
+    ln -sfn "$SENSITIVE_DIR" /Confidencial
+fi
 
 if [ -n "$USER_HOME" ]; then
     mkdir -p "$DOCUMENTS_DIR"

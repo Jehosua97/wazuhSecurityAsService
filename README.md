@@ -33,7 +33,7 @@ Construir una plataforma mínima viable que permita:
 
 ## Arquitectura general
 
-Estado actual validado: Wazuh vive en GCP como plano central de monitoreo, mientras que el ambiente tipo cliente vive principalmente en Docker local. Los endpoints GCP antiguos existen como opcion Terraform, pero para el MVP comercial actual se recomienda mantener `enable_gcp_endpoints = false` y operar los endpoints locales con Docker.
+Estado actual objetivo: Wazuh, endpoints Linux, Windows Server y n8n pueden vivir completos en GCP. El modo Docker local queda como fallback para demos rapidas o ahorro de costo, pero el `terraform.tfvars` local de este repo ya queda preparado con `enable_gcp_endpoints = true`, `enable_windows_server = true` y `enable_n8n = true`.
 
 ```text
                          Equipo SOC / Demo
@@ -92,19 +92,31 @@ Estado actual validado: Wazuh vive en GCP como plano central de monitoreo, mient
         |
         v
 +------------------------------------------------------------------+
-|                    Componentes opcionales                         |
+|                    Fallbacks locales opcionales                    |
 |  - docker-compose.windows.yml: Windows container demo             |
 |  - ansible/windows-ad-lab: Windows Server 2016 + AD en VirtualBox |
-|  - Endpoints GCP legacy via Terraform si enable_gcp_endpoints=true|
+|  - Docker local si enable_gcp_endpoints=false                     |
++------------------------------------------------------------------+
+        |
+        v
++------------------------------------------------------------------+
+|              Automatizacion MSSP / Vulnerability Triage           |
+|  - n8n-automation en GCP con IP publica estatica                  |
+|  - Disco persistente para workflows, credenciales y evidencia     |
+|  - Wazuh Indexer query: wazuh-states-vulnerabilities*             |
+|  - CISA KEV + FIRST EPSS enrichment                               |
+|  - Priorizacion P1-P4                                             |
+|  - Evidencia Markdown/JSON                                        |
+|  - Jira Cloud tickets opcionales                                  |
 +------------------------------------------------------------------+
 ```
 
 ## Componentes actuales
 
-- `terraform/wazuh-deploy`: infraestructura GCP con Terraform para Wazuh single-node, red, firewall, IP publica estatica y outputs operativos.
+- `terraform/wazuh-deploy`: infraestructura GCP con Terraform para Wazuh single-node, endpoints Linux, Windows Server, n8n persistente, red, firewall, IPs publicas estaticas y outputs operativos.
 - `terraform/config/wazuh-manager`: configuracion administrada del manager Wazuh: reglas, decoders, listas, `ossec.conf`, herramientas y Active Response seguro de demo.
-- `docker-compose.endpoints.yml`: ambiente cliente local con endpoints Linux y `juice-shop`.
-- `docker-compose.windows.yml`: endpoint Windows opcional; requiere Docker Desktop en modo Windows containers.
+- `docker-compose.endpoints.yml`: fallback local con endpoints Linux y `juice-shop`.
+- `docker-compose.windows.yml`: fallback local Windows; requiere Docker Desktop en modo Windows containers.
 - `docker/linux-endpoints`: imagen base de endpoints Linux con agente Wazuh, perfiles por servicio, scripts de eventos y modulos del agente.
 - `docker/windows-endpoint`: imagen base de Windows Server demo para pruebas controladas.
 - `dashboards/wazuh-soc-dashboards.ndjson`: dashboards importables a Wazuh/OpenSearch Dashboards, incluyendo vista SOC y vista de modulos Wazuh.
@@ -117,6 +129,9 @@ Estado actual validado: Wazuh vive en GCP como plano central de monitoreo, mient
 - `scripts/import-wazuh-dashboards.ps1`: importa dashboards SOC al dashboard.
 - `scripts/setup-linux-ui-sensitive-agent.sh`: configura el escenario Linux UI con carpeta sensible `/Confidencial`.
 - `scripts/simulate-confidential-ransomware-burst.sh`: genera rafaga FIM segura para el escenario de ransomware heuristico.
+- `docker-compose.n8n.yml`: fallback local para automatizacion de vulnerabilidades.
+- `integrations/n8n`: workflow, script, variables de ejemplo y evidencia de triage de vulnerabilidades.
+- `docs/n8n-vulnerability-automation.md`: guia rapida de automatizacion Wazuh + n8n + KEV/EPSS + Jira.
 - `docs/`: documentacion tecnica, playbooks, runbooks y guias actuales.
 
 ## Componentes a desarrollar
@@ -380,20 +395,26 @@ Esta es la seccion operativa principal para el equipo. Si alguien nuevo entra al
 | --- | --- |
 | Ver estado completo del lab | `.\scripts\lab-master.ps1 -Action status` |
 | Abrir menu interactivo | `.\scripts\lab-master.ps1 -Action menu` |
-| Encender Wazuh GCP y endpoints Linux | `.\scripts\lab-master.ps1 -Action full-start` |
+| Encender lab completo en GCP | `.\scripts\lab-master.ps1 -Action full-start` |
 | Modo ahorro sin perder IP | `.\scripts\lab-master.ps1 -Action cost-saver` |
 | Encender solo Wazuh en GCP | `.\scripts\lab-master.ps1 -Action start-wazuh` |
 | Apagar solo Wazuh en GCP | `.\scripts\lab-master.ps1 -Action stop-wazuh` |
+| Encender todas las VMs GCP del lab | `.\scripts\lab-master.ps1 -Action start-cloud` |
+| Apagar todas las VMs GCP del lab | `.\scripts\lab-master.ps1 -Action stop-cloud` |
 | Encender endpoints Linux locales | `.\scripts\lab-master.ps1 -Action start-linux` |
 | Detener endpoints Linux locales | `.\scripts\lab-master.ps1 -Action stop-linux` |
 | Aplicar reglas/configuracion Wazuh | `.\scripts\lab-master.ps1 -Action configure-wazuh` |
 | Crear o actualizar infraestructura GCP | `.\scripts\lab-master.ps1 -Action apply-gcp` |
 | Destruir infraestructura GCP | `.\scripts\lab-master.ps1 -Action destroy-gcp` |
 | Borrar contenedores/volumenes Linux | `.\scripts\lab-master.ps1 -Action destroy-linux` |
+| Ver URL n8n cloud | `terraform -chdir=terraform/wazuh-deploy output n8n_url` |
+| Ver password n8n cloud | `terraform -chdir=terraform/wazuh-deploy output -raw n8n_credentials_command` |
+| Ejecutar triage n8n cloud | `terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_triage_command` |
+| Levantar n8n local fallback | `.\scripts\n8n-security-automation.ps1 -Action up` |
 
 Notas:
 
-- `cost-saver` apaga la VM y detiene contenedores, pero mantiene la IP estatica reservada por Terraform. Es el comando recomendado para bajar costos sin romper agentes.
+- `cost-saver` apaga las VMs GCP del lab y detiene contenedores locales visibles, pero mantiene discos e IPs estaticas reservadas por Terraform. Es el comando recomendado para bajar costos sin destruir el ambiente.
 - `destroy-gcp` es destructivo: elimina infraestructura de GCP y puede romper la continuidad de la demo.
 - `destroy-linux` es destructivo para volumenes locales de Docker; usarlo solo si se quiere reconstruir el lab desde cero.
 
@@ -405,6 +426,8 @@ Notas:
 | `scripts/local-docker-lab.ps1` | Operacion directa de Docker Compose para endpoints locales. | `-Scope Linux -Action up`, `-Scope Linux -Action logs -Follow` |
 | `scripts/apply-wazuh-config.ps1` | Copia reglas, decoders, listas, Active Response y `ossec.conf` al manager. | `.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"` |
 | `scripts/import-wazuh-dashboards.ps1` | Importa dashboards SOC y de modulos Wazuh. | `.\scripts\import-wazuh-dashboards.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a" -DashboardUser "admin" -DashboardPassword $env:WAZUH_DASHBOARD_PASSWORD` |
+| `scripts/n8n-security-automation.ps1` | Opera n8n local fallback, importa workflow y corre triage de vulnerabilidades. | `-Action up`, `-Action import-workflow`, `-Action run-triage` |
+| `scripts/start-wazuh-indexer-tunnel.ps1` | Abre tunel SSH local hacia Wazuh Indexer solo para n8n local fallback. | `.\scripts\start-wazuh-indexer-tunnel.ps1` |
 
 Acciones disponibles en `local-docker-lab.ps1`:
 
@@ -496,6 +519,39 @@ ansible-playbook -i inventories\vagrant.yml playbooks\04-run-demo-events.yml
 
 Archivo principal: `ansible/windows-ad-lab/README.md`.
 
+### Automatizacion n8n de vulnerabilidades
+
+Este modulo convierte vulnerabilidades detectadas por Wazuh en prioridades operativas y tickets Jira opcionales.
+
+Modo GCP persistente:
+
+```powershell
+terraform -chdir=terraform/wazuh-deploy output n8n_url
+terraform -chdir=terraform/wazuh-deploy output -raw n8n_credentials_command
+terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_triage_command
+```
+
+En este modo n8n vive en `n8n-automation`, usa disco persistente y consulta el Wazuh Indexer por IP privada. No necesita tunel local.
+
+Fallback local:
+
+```powershell
+Copy-Item integrations\n8n\.env.example integrations\n8n\.env
+.\scripts\start-wazuh-indexer-tunnel.ps1
+.\scripts\n8n-security-automation.ps1 -Action up
+.\scripts\n8n-security-automation.ps1 -Action import-workflow
+.\scripts\n8n-security-automation.ps1 -Action run-triage
+```
+
+Salida esperada:
+
+```text
+integrations/n8n/output/vulnerability-triage-latest.json
+integrations/n8n/output/vulnerability-triage-latest.md
+```
+
+Documentacion: `integrations/n8n/README.md` y `docs/n8n-vulnerability-automation.md`.
+
 ## Cómo ejecutar la demo
 
 Para operacion diaria usa el camino corto:
@@ -531,8 +587,13 @@ Valores mínimos recomendados para demo segura:
 admin_source_ranges = ["TU_IP_PUBLICA/32"]
 target_source_ranges = ["TU_IP_PUBLICA/32"]
 extra_agent_source_ranges = ["TU_IP_PUBLICA/32"]
-enable_gcp_endpoints = false
+n8n_source_ranges = ["TU_IP_PUBLICA/32"]
+enable_gcp_endpoints = true
+enable_windows_server = true
+enable_n8n = true
 ```
+
+Si GCP devuelve `windowsVmNotAllowedInFreeTrialProject`, el proyecto aun no permite Windows Server VMs. En ese caso deja `enable_windows_server = false` hasta habilitar billing compatible con Windows; el resto del lab cloud queda operativo.
 
 ### 3. Levantar Wazuh en GCP
 
@@ -687,6 +748,8 @@ Documentos existentes:
 - `docs/soc-mvp-playbook.md`
 - `docs/wazuh-soc-dashboards.md`
 - `docs/wazuh-agent-modules-demo.md`
+- `docs/n8n-vulnerability-automation.md`
+- `integrations/n8n/README.md`
 
 Documentos por crear:
 

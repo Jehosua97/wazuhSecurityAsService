@@ -247,7 +247,7 @@ $savedObjects = @(
 
     (New-WazuhSearchObject `
         -Id "soc-ops-linux-ui-sensitive" `
-        -Title "SOC Operativo - Linux UI /Confidencial" `
+        -Title "SOC Operativo - Linux UI /home/esquivel/Confidencial" `
         -Description "DLP/FIM, ransomware, autenticacion critica y port scan del endpoint Linux UI." `
         -Query 'rule.id: (100010 or 100015 or 100020 or 100030) or rule.groups: linux_ui_endpoint'),
 

@@ -6,13 +6,13 @@
   <rule id="100015" level="10">
     <if_sid>550,553,554</if_sid>
     <match>/Confidencial</match>
-    <description>DLP/FIM: sensitive folder activity detected under /Confidencial.</description>
+    <description>DLP/FIM: sensitive folder activity detected under /home/esquivel/Confidencial.</description>
     <group>dlp,fim,syscheck,confidential_data,sensitive_folder,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.8.2.3,lfpdppp,</group>
   </rule>
 
   <rule id="100010" level="12" frequency="4" timeframe="10" ignore="60">
     <if_matched_sid>100015</if_matched_sid>
-    <description>Ransomware heuristic: burst of changes detected in /Confidencial.</description>
+    <description>Ransomware heuristic: burst of changes detected in /home/esquivel/Confidencial.</description>
     <mitre>
       <id>T1486</id>
     </mitre>

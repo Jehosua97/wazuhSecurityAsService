@@ -11,6 +11,10 @@
 - Creada carpeta `ansible/windows-ad-lab/` con Vagrantfile, inventario, playbooks Ansible, variables de ejemplo y generador seguro de eventos para Windows Server 2016 + Active Directory + Wazuh Agent.
 - Agregada demo de modulos del agente Wazuh en contenedores Linux: log collector, command, FIM, SCA, syscollector, rootcheck, active response seguro, Docker listener, cloud demo y vulnerability detection.
 - Agregado dashboard `SOC Modulos Wazuh - Demo tecnico` y documentacion `docs/wazuh-agent-modules-demo.md`.
+- Agregada automatizacion `integrations/n8n/` para triage de vulnerabilidades con Wazuh Indexer, CISA KEV, FIRST EPSS y Jira opcional.
+- Agregado `docker-compose.n8n.yml` para levantar n8n local.
+- Agregados scripts `scripts/n8n-security-automation.ps1` y `scripts/start-wazuh-indexer-tunnel.ps1`.
+- Agregada documentacion `docs/n8n-vulnerability-automation.md` e `integrations/n8n/README.md`.
 
 ### Fixed
 

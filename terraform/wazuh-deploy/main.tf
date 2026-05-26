@@ -106,15 +106,19 @@ resource "google_compute_firewall" "admin_ssh_firewall" {
   }
 
   source_ranges = var.admin_source_ranges
-  target_tags = var.enable_gcp_endpoints ? [
-    "wazuh-manager",
-    "vulnerable-target",
-    "metasploit-endpoint",
-    "edge-gateway",
-    "db-server",
-    "docker-host",
-    "linux-ui-endpoint",
-  ] : ["wazuh-manager"]
+  target_tags = concat(
+    ["wazuh-manager"],
+    var.enable_gcp_endpoints ? [
+      "vulnerable-target",
+      "metasploit-endpoint",
+      "edge-gateway",
+      "db-server",
+      "docker-host",
+      "linux-ui-endpoint",
+    ] : [],
+    var.enable_windows_server ? ["windows-endpoint"] : [],
+    var.enable_n8n ? ["n8n-automation"] : [],
+  )
 }
 
 # RDP access for the monitored Windows endpoint. Restrict admin_source_ranges before production use.
@@ -389,6 +393,7 @@ resource "google_compute_instance" "linux_ui_workstation" {
     wazuh_agent_name = var.linux_ui_instance_name
     wazuh_version    = var.wazuh_version
     linux_ui_user    = var.linux_ui_user
+    sensitive_dir    = var.linux_ui_sensitive_dir
   }), "\r\n", "\n")
 }
 
@@ -428,6 +433,128 @@ resource "google_compute_instance" "windows_server" {
       wazuh_version    = var.wazuh_version
     })
   }
+}
+
+# Static public endpoint for n8n so browser bookmarks and webhook URLs do not change between restarts.
+resource "google_compute_address" "n8n_public_ip" {
+  count = var.enable_n8n ? 1 : 0
+
+  name   = "${var.n8n_instance_name}-public-ip"
+  region = var.region
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "automation"
+  }
+}
+
+# Dedicated persistent disk for n8n workflows, credentials and generated evidence.
+resource "google_compute_disk" "n8n_data_disk" {
+  count = var.enable_n8n ? 1 : 0
+
+  name = "${var.n8n_instance_name}-data"
+  type = "pd-balanced"
+  zone = var.zone
+  size = var.n8n_data_disk_size
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "automation-data"
+  }
+}
+
+# Persistent n8n automation host connected to Wazuh over the private VPC.
+resource "google_compute_instance" "n8n_server" {
+  count = var.enable_n8n ? 1 : 0
+
+  name         = var.n8n_instance_name
+  machine_type = var.n8n_machine_type
+  zone         = var.zone
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "n8n-automation"
+  }
+
+  boot_disk {
+    initialize_params {
+      image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+      size  = var.n8n_boot_disk_size
+    }
+  }
+
+  attached_disk {
+    source      = google_compute_disk.n8n_data_disk[0].self_link
+    device_name = "n8n-data"
+    mode        = "READ_WRITE"
+  }
+
+  network_interface {
+    network    = google_compute_network.vpc_wazuh.self_link
+    subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
+    access_config {
+      nat_ip = google_compute_address.n8n_public_ip[0].address
+    }
+  }
+
+  tags = ["n8n-automation", "managed-automation"]
+
+  metadata_startup_script = replace(templatefile("./scripts/n8n_startup.sh.tftpl", {
+    n8n_image                  = var.n8n_image
+    n8n_port                   = var.n8n_port
+    n8n_public_url             = "http://${google_compute_address.n8n_public_ip[0].address}:${var.n8n_port}"
+    n8n_basic_auth_user        = var.n8n_basic_auth_user
+    n8n_basic_auth_password    = var.n8n_basic_auth_password
+    n8n_encryption_key         = var.n8n_encryption_key
+    wazuh_manager_ip           = google_compute_instance.wazuh_server.network_interface[0].network_ip
+    wazuh_agent_name           = var.n8n_instance_name
+    wazuh_version              = var.wazuh_version
+    wazuh_indexer_url          = "https://${google_compute_instance.wazuh_server.network_interface[0].network_ip}:9200"
+    wazuh_indexer_username     = var.n8n_wazuh_indexer_username
+    wazuh_indexer_password     = var.n8n_wazuh_indexer_password
+    wazuh_indexer_insecure_tls = var.n8n_wazuh_indexer_insecure_tls
+    demo_company_name          = var.demo_company_name
+    n8n_triage_script_b64      = filebase64("${path.module}/../../integrations/n8n/scripts/wazuh-vulnerability-triage.js")
+    n8n_workflow_b64           = filebase64("${path.module}/../../integrations/n8n/workflows/wazuh-vulnerability-triage.workflow.json")
+    n8n_sample_b64             = filebase64("${path.module}/../../integrations/n8n/samples/wazuh-vulnerabilities-sample.json")
+  }), "\r\n", "\n")
+
+  depends_on = [google_compute_instance.wazuh_server]
+}
+
+# Public n8n access for the automation UI and webhooks. Restrict n8n_source_ranges for real operations.
+resource "google_compute_firewall" "n8n_public_firewall" {
+  count = var.enable_n8n ? 1 : 0
+
+  name    = "n8n-public-ingress"
+  network = google_compute_network.vpc_wazuh.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = [format("%d", var.n8n_port)]
+  }
+
+  source_ranges = var.n8n_source_ranges
+  target_tags   = ["n8n-automation"]
+}
+
+# Let n8n query the Wazuh Indexer over the private network without opening 9200 to the internet.
+resource "google_compute_firewall" "wazuh_indexer_from_n8n_firewall" {
+  count = var.enable_n8n ? 1 : 0
+
+  name    = "wazuh-indexer-from-n8n"
+  network = google_compute_network.vpc_wazuh.self_link
+
+  allow {
+    protocol = "tcp"
+    ports    = ["9200"]
+  }
+
+  source_tags = ["n8n-automation"]
+  target_tags = ["wazuh-manager"]
 }
 
 # Public access to the landing page and Juice Shop lab for sales demos.

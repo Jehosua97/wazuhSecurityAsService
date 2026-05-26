@@ -8,6 +8,8 @@ param(
         "apply-gcp",
         "destroy-gcp",
         "configure-wazuh",
+        "start-cloud",
+        "stop-cloud",
         "start-linux",
         "stop-linux",
         "destroy-linux",
@@ -114,12 +116,20 @@ function Get-DockerEngineOsType {
         return ""
     }
 
-    $osType = & docker info --format "{{.OSType}}" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        return ""
-    }
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $osType = & docker info --format "{{.OSType}}" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            return ""
+        }
 
-    return ($osType | Out-String).Trim().ToLowerInvariant()
+        return ($osType | Out-String).Trim().ToLowerInvariant()
+    } catch {
+        return ""
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 function Assert-DockerEngine {
@@ -289,7 +299,14 @@ function Get-GcpLabInstances {
     $items = @()
     $parsed = ($raw | Out-String).Trim()
     if ($parsed) {
-        $items = @($parsed | ConvertFrom-Json)
+        $converted = $parsed | ConvertFrom-Json
+        if ($converted -is [System.Collections.IEnumerable] -and -not ($converted -is [string])) {
+            foreach ($item in $converted) {
+                $items += $item
+            }
+        } else {
+            $items = @($converted)
+        }
     }
 
     return [pscustomobject]@{
@@ -310,7 +327,20 @@ function Get-ComposeStatus {
         }
     }
 
-    $raw = & docker compose -f $ComposeFile ps --format json 2>$null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $raw = & docker compose -f $ComposeFile ps --format json 2>$null
+    } catch {
+        return [pscustomobject]@{
+            Available = $false
+            Error     = "No pude consultar $ComposeFile en el engine Docker actual"
+            Items     = @()
+        }
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
     if ($LASTEXITCODE -ne 0) {
         return [pscustomobject]@{
             Available = $false
@@ -456,6 +486,54 @@ function Stop-WazuhGcp {
     )
 }
 
+function Start-GcpLabInstances {
+    $gcp = Get-GcpLabInstances
+    if (-not $gcp.Available) {
+        throw $gcp.Error
+    }
+
+    $targets = @($gcp.Items | Where-Object { $_.status -ne "RUNNING" })
+    if ($targets.Count -eq 0) {
+        Write-Host "Todas las VMs GCP del lab ya estan corriendo."
+        return
+    }
+
+    foreach ($item in $targets) {
+        $itemZone = ($item.zone -split "/")[-1]
+        Invoke-CheckedCommand -FilePath "gcloud" -Arguments @(
+            "compute", "instances", "start", $item.name,
+            "--project=$ProjectId",
+            "--zone=$itemZone",
+            "--quiet"
+        )
+    }
+
+    $null = Sync-WazuhManagerIpEnv
+}
+
+function Stop-GcpLabInstances {
+    $gcp = Get-GcpLabInstances
+    if (-not $gcp.Available) {
+        throw $gcp.Error
+    }
+
+    $targets = @($gcp.Items | Where-Object { $_.status -eq "RUNNING" })
+    if ($targets.Count -eq 0) {
+        Write-Host "Todas las VMs GCP del lab ya estan apagadas."
+        return
+    }
+
+    foreach ($item in $targets) {
+        $itemZone = ($item.zone -split "/")[-1]
+        Invoke-CheckedCommand -FilePath "gcloud" -Arguments @(
+            "compute", "instances", "stop", $item.name,
+            "--project=$ProjectId",
+            "--zone=$itemZone",
+            "--quiet"
+        )
+    }
+}
+
 function Apply-GcpLab {
     Invoke-Terraform -TerraformArgs @("init")
     $args = @("apply")
@@ -557,19 +635,18 @@ function Stop-LocalContainers {
 }
 
 function Invoke-CostSaver {
-    Write-Host "Modo ahorro: detiene contenedores visibles en el engine actual y apaga Wazuh en GCP."
+    Write-Host "Modo ahorro: detiene contenedores visibles y apaga las VMs GCP del lab sin destruir discos/IPs."
     Stop-LocalContainers
-    Stop-WazuhGcp
-    Write-Host "Costo minimo sin destruir: quedan costos pequenos de disco/IP estatica. Para ahorro maximo usa -Action destroy-gcp."
+    Stop-GcpLabInstances
+    Write-Host "Costo minimo sin destruir: quedan costos pequenos de discos/IPs estaticas. Para ahorro maximo usa -Action destroy-gcp."
 }
 
 function Start-FullLab {
-    Start-WazuhGcp
-    Write-Host "Esperando 45 segundos para que Wazuh/Docker despierten..."
+    Start-GcpLabInstances
+    Write-Host "Esperando 45 segundos para que Wazuh, endpoints y n8n despierten..."
     Start-Sleep -Seconds 45
     $null = Sync-WazuhManagerIpEnv
-    Invoke-ComposeLab -Scope Linux -ComposeAction up
-    Write-Host "Windows requiere cambiar Docker Desktop a Windows containers y correr -Action start-windows."
+    Show-GcpStatus
 }
 
 function Show-Menu {
@@ -582,14 +659,16 @@ function Show-Menu {
         Write-Host "  4. Crear/reparar GCP con Terraform apply"
         Write-Host "  5. Destruir GCP con Terraform destroy"
         Write-Host "  6. Aplicar config/reglas/dashboards Wazuh"
-        Write-Host "  7. Encender contenedores Linux"
-        Write-Host "  8. Apagar contenedores Linux"
-        Write-Host "  9. Destruir contenedores Linux"
-        Write-Host " 10. Encender contenedor Windows"
-        Write-Host " 11. Apagar contenedor Windows"
-        Write-Host " 12. Destruir contenedor Windows"
-        Write-Host " 13. Modo ahorro: apagar local + apagar Wazuh"
-        Write-Host " 14. Encender lab principal: Wazuh + Linux"
+        Write-Host "  7. Encender VMs GCP del lab"
+        Write-Host "  8. Apagar VMs GCP del lab"
+        Write-Host "  9. Encender contenedores Linux fallback"
+        Write-Host " 10. Apagar contenedores Linux fallback"
+        Write-Host " 11. Destruir contenedores Linux fallback"
+        Write-Host " 12. Encender contenedor Windows fallback"
+        Write-Host " 13. Apagar contenedor Windows fallback"
+        Write-Host " 14. Destruir contenedor Windows fallback"
+        Write-Host " 15. Modo ahorro: apagar local + apagar GCP"
+        Write-Host " 16. Encender lab completo en GCP"
         Write-Host "  0. Salir"
 
         $choice = Read-Host "Elige"
@@ -600,14 +679,16 @@ function Show-Menu {
             "4" { Apply-GcpLab }
             "5" { Destroy-GcpLab }
             "6" { Configure-WazuhManager }
-            "7" { Invoke-ComposeLab -Scope Linux -ComposeAction up }
-            "8" { Invoke-ComposeLab -Scope Linux -ComposeAction down }
-            "9" { Invoke-ComposeLab -Scope Linux -ComposeAction destroy }
-            "10" { Invoke-ComposeLab -Scope Windows -ComposeAction up }
-            "11" { Invoke-ComposeLab -Scope Windows -ComposeAction down }
-            "12" { Invoke-ComposeLab -Scope Windows -ComposeAction destroy }
-            "13" { Invoke-CostSaver }
-            "14" { Start-FullLab }
+            "7" { Start-GcpLabInstances }
+            "8" { Stop-GcpLabInstances }
+            "9" { Invoke-ComposeLab -Scope Linux -ComposeAction up }
+            "10" { Invoke-ComposeLab -Scope Linux -ComposeAction down }
+            "11" { Invoke-ComposeLab -Scope Linux -ComposeAction destroy }
+            "12" { Invoke-ComposeLab -Scope Windows -ComposeAction up }
+            "13" { Invoke-ComposeLab -Scope Windows -ComposeAction down }
+            "14" { Invoke-ComposeLab -Scope Windows -ComposeAction destroy }
+            "15" { Invoke-CostSaver }
+            "16" { Start-FullLab }
             "0" { return }
             default { Write-Host "Opcion no valida." }
         }
@@ -626,6 +707,8 @@ try {
         "apply-gcp" { Apply-GcpLab }
         "destroy-gcp" { Destroy-GcpLab }
         "configure-wazuh" { Configure-WazuhManager }
+        "start-cloud" { Start-GcpLabInstances }
+        "stop-cloud" { Stop-GcpLabInstances }
         "start-linux" { Invoke-ComposeLab -Scope Linux -ComposeAction up }
         "stop-linux" { Invoke-ComposeLab -Scope Linux -ComposeAction down }
         "destroy-linux" { Invoke-ComposeLab -Scope Linux -ComposeAction destroy }

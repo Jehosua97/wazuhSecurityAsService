@@ -17,7 +17,7 @@ WAZUH_MANAGER_IP="${wazuh_manager_ip}"
 WAZUH_AGENT_NAME="${wazuh_agent_name}"
 WAZUH_VERSION="${wazuh_version}"
 LAB_USER="${linux_ui_user}"
-SENSITIVE_DIR="/Confidencial"
+SENSITIVE_DIR="${sensitive_dir}"
 PASSWORD_FILE="/root/linux-ui-rdp-credentials.txt"
 
 echo "Starting Linux UI endpoint setup..."
@@ -88,6 +88,14 @@ mkdir -p "$SENSITIVE_DIR"
 chown root:"$LAB_USER" "$SENSITIVE_DIR"
 chmod 0770 "$SENSITIVE_DIR"
 
+if [ "$SENSITIVE_DIR" != "/Confidencial" ]; then
+    if [ -d /Confidencial ] && [ ! -L /Confidencial ]; then
+        cp -a /Confidencial/. "$SENSITIVE_DIR/" 2>/dev/null || true
+        rm -rf /Confidencial
+    fi
+    ln -sfn "$SENSITIVE_DIR" /Confidencial
+fi
+
 mkdir -p "/home/$LAB_USER/Documents" "/home/$LAB_USER/Documentos" "/home/$LAB_USER/Desktop"
 ln -sfn "$SENSITIVE_DIR" "/home/$LAB_USER/Documents/Confidencial"
 ln -sfn "$SENSITIVE_DIR" "/home/$LAB_USER/Documentos/Confidencial"
@@ -97,7 +105,7 @@ chown -h "$LAB_USER:$LAB_USER" "/home/$LAB_USER/Documents/Confidencial" "/home/$
 
 cat >"$SENSITIVE_DIR/README-demo.txt" <<'EOF'
 Carpeta sensible de demostracion.
-Los cambios, creaciones y borrados aqui deben generar la regla 100015.
+Los cambios, creaciones y borrados en ${sensitive_dir} deben generar la regla 100015.
 Una rafaga de cambios debe generar la regla 100010.
 EOF
 chown root:"$LAB_USER" "$SENSITIVE_DIR/README-demo.txt"
@@ -175,7 +183,7 @@ cat >/usr/local/bin/simulate-confidential-ransomware-burst.sh <<'EOF'
 
 set -euo pipefail
 
-TARGET_DIR="$${1:-/Confidencial}"
+TARGET_DIR="$${1:-${sensitive_dir}}"
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 
 mkdir -p "$TARGET_DIR"

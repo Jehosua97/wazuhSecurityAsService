@@ -1,0 +1,18 @@
+services:
+  n8n:
+    image: ${N8N_IMAGE:-n8nio/n8n:1.94.1}
+    container_name: wazuh-security-n8n
+    restart: unless-stopped
+    env_file:
+      - ./integrations/n8n/.env
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./integrations/n8n/workflows:/home/node/.n8n/workflows:ro
+      - ./integrations/n8n/scripts:/home/node/.n8n/scripts:ro
+      - ./integrations/n8n/samples:/home/node/.n8n/samples:ro
+      - ./integrations/n8n/output:/home/node/.n8n/output
+
+volumes:
+  n8n_data:

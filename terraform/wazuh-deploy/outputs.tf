@@ -23,6 +23,41 @@ output "agent_enrollment_ports" {
   }
 }
 
+output "n8n_public_ip" {
+  description = "Static public IP of the persistent n8n automation VM"
+  value       = var.enable_n8n ? google_compute_address.n8n_public_ip[0].address : null
+}
+
+output "n8n_url" {
+  description = "Public URL of the persistent n8n automation UI"
+  value       = var.enable_n8n ? "http://${google_compute_address.n8n_public_ip[0].address}:${var.n8n_port}" : null
+}
+
+output "n8n_agent_name" {
+  description = "Agent name expected in the Wazuh dashboard for the n8n automation VM"
+  value       = var.n8n_instance_name
+}
+
+output "n8n_basic_auth_user" {
+  description = "Basic-auth username for the public n8n UI"
+  value       = var.enable_n8n ? var.n8n_basic_auth_user : null
+}
+
+output "n8n_credentials_command" {
+  description = "Command to read the generated n8n basic-auth password from the persistent data disk"
+  value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo cat /mnt/disks/n8n-data/credentials/n8n-basic-auth-password.txt\"" : null
+}
+
+output "n8n_run_triage_command" {
+  description = "Command to run the Wazuh vulnerability triage script inside the cloud n8n container"
+  value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo docker exec wazuh-security-n8n node /home/node/.n8n/scripts/wazuh-vulnerability-triage.js\"" : null
+}
+
+output "n8n_logs_command" {
+  description = "Command to inspect the n8n container logs on the cloud VM"
+  value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo docker logs --tail 120 wazuh-security-n8n\"" : null
+}
+
 output "local_docker_linux_up_command" {
   description = "Command to start all local Linux Docker endpoints against the cloud Wazuh manager"
   value       = ".\\scripts\\local-docker-lab.ps1 -Scope Linux -Action up"

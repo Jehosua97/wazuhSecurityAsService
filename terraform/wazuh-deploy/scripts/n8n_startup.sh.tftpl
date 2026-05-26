@@ -1,0 +1,325 @@
+#!/bin/bash
+
+set -euo pipefail
+
+LOG_FILE="/var/log/n8n-startup.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec >>"$LOG_FILE" 2>&1
+
+handle_error() {
+    echo "Error on line $1"
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+DATA_DEVICE="/dev/disk/by-id/google-n8n-data"
+DATA_ROOT="/mnt/disks/n8n-data"
+APP_DIR="/opt/wazuh-n8n"
+ENV_FILE="$APP_DIR/.env"
+SERVICE_FILE="/etc/systemd/system/wazuh-n8n.service"
+AUTH_PASSWORD_FILE="$DATA_ROOT/credentials/n8n-basic-auth-password.txt"
+ENCRYPTION_KEY_FILE="$DATA_ROOT/credentials/n8n-encryption-key.txt"
+WAZUH_MANAGER_IP="${wazuh_manager_ip}"
+WAZUH_AGENT_NAME="${wazuh_agent_name}"
+WAZUH_VERSION="${wazuh_version}"
+
+echo "Starting n8n automation VM setup..."
+echo "Using Wazuh manager at $WAZUH_MANAGER_IP"
+
+PROVIDED_N8N_BASIC_AUTH_PASSWORD=$(cat <<'EOF_N8N_BASIC_AUTH_PASSWORD'
+${n8n_basic_auth_password}
+EOF_N8N_BASIC_AUTH_PASSWORD
+)
+
+PROVIDED_N8N_ENCRYPTION_KEY=$(cat <<'EOF_N8N_ENCRYPTION_KEY'
+${n8n_encryption_key}
+EOF_N8N_ENCRYPTION_KEY
+)
+
+WAZUH_INDEXER_PASSWORD=$(cat <<'EOF_WAZUH_INDEXER_PASSWORD'
+${wazuh_indexer_password}
+EOF_WAZUH_INDEXER_PASSWORD
+)
+
+wait_for_manager() {
+    for attempt in $(seq 1 90); do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$WAZUH_MANAGER_IP/1515" 2>/dev/null; then
+            echo "Wazuh manager authd is reachable."
+            return 0
+        fi
+
+        echo "Waiting for Wazuh manager authd on $WAZUH_MANAGER_IP:1515 (attempt $attempt/90)..."
+        sleep 10
+    done
+
+    echo "Timed out waiting for Wazuh manager authd."
+    return 1
+}
+
+wait_for_data_disk() {
+    for attempt in $(seq 1 30); do
+        if [ -e "$DATA_DEVICE" ]; then
+            return 0
+        fi
+
+        echo "Waiting for attached n8n data disk (attempt $attempt/30)..."
+        sleep 2
+    done
+
+    echo "n8n data disk not found at $DATA_DEVICE"
+    return 1
+}
+
+mount_data_disk() {
+    wait_for_data_disk
+
+    if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+        echo "Formatting n8n data disk..."
+        mkfs.ext4 -F "$DATA_DEVICE"
+    fi
+
+    mkdir -p "$DATA_ROOT"
+    if ! mountpoint -q "$DATA_ROOT"; then
+        mount -o discard,defaults "$DATA_DEVICE" "$DATA_ROOT"
+    fi
+
+    if ! grep -q "$DATA_DEVICE" /etc/fstab; then
+        echo "$DATA_DEVICE $DATA_ROOT ext4 discard,defaults,nofail 0 2" >> /etc/fstab
+    fi
+
+    mkdir -p "$DATA_ROOT/home" "$DATA_ROOT/output" "$DATA_ROOT/credentials"
+    chown -R 1000:1000 "$DATA_ROOT/home" "$DATA_ROOT/output"
+    chmod 700 "$DATA_ROOT/credentials"
+}
+
+ensure_secret_file() {
+    local file_path="$1"
+    local provided_value="$2"
+    local generator="$3"
+
+    if [ -s "$file_path" ]; then
+        return 0
+    fi
+
+    if [ -n "$provided_value" ]; then
+        printf "%s" "$provided_value" > "$file_path"
+    else
+        bash -c "$generator" > "$file_path"
+    fi
+
+    chmod 600 "$file_path"
+}
+
+install_packages() {
+    echo "Installing n8n host packages..."
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        apt-transport-https \
+        ca-certificates \
+        curl \
+        docker.io \
+        gnupg \
+        jq \
+        openssl
+
+    systemctl enable docker
+    systemctl restart docker
+}
+
+write_n8n_assets() {
+    mkdir -p "$APP_DIR/workflows" "$APP_DIR/scripts" "$APP_DIR/samples"
+
+    cat > "$APP_DIR/scripts/wazuh-vulnerability-triage.js.b64" <<'EOF_TRIAGE_SCRIPT_B64'
+${n8n_triage_script_b64}
+EOF_TRIAGE_SCRIPT_B64
+    base64 -d "$APP_DIR/scripts/wazuh-vulnerability-triage.js.b64" > "$APP_DIR/scripts/wazuh-vulnerability-triage.js"
+    rm -f "$APP_DIR/scripts/wazuh-vulnerability-triage.js.b64"
+    chmod 755 "$APP_DIR/scripts/wazuh-vulnerability-triage.js"
+
+    cat > "$APP_DIR/workflows/wazuh-vulnerability-triage.workflow.json.b64" <<'EOF_WORKFLOW_B64'
+${n8n_workflow_b64}
+EOF_WORKFLOW_B64
+    base64 -d "$APP_DIR/workflows/wazuh-vulnerability-triage.workflow.json.b64" > "$APP_DIR/workflows/wazuh-vulnerability-triage.workflow.json"
+    rm -f "$APP_DIR/workflows/wazuh-vulnerability-triage.workflow.json.b64"
+
+    cat > "$APP_DIR/samples/wazuh-vulnerabilities-sample.json.b64" <<'EOF_SAMPLE_B64'
+${n8n_sample_b64}
+EOF_SAMPLE_B64
+    base64 -d "$APP_DIR/samples/wazuh-vulnerabilities-sample.json.b64" > "$APP_DIR/samples/wazuh-vulnerabilities-sample.json"
+    rm -f "$APP_DIR/samples/wazuh-vulnerabilities-sample.json.b64"
+
+    chown -R root:root "$APP_DIR"
+}
+
+write_n8n_env() {
+    ensure_secret_file "$AUTH_PASSWORD_FILE" "$PROVIDED_N8N_BASIC_AUTH_PASSWORD" "openssl rand -base64 24"
+    ensure_secret_file "$ENCRYPTION_KEY_FILE" "$PROVIDED_N8N_ENCRYPTION_KEY" "openssl rand -hex 24"
+
+    N8N_BASIC_AUTH_PASSWORD=$(cat "$AUTH_PASSWORD_FILE")
+    N8N_ENCRYPTION_KEY=$(cat "$ENCRYPTION_KEY_FILE")
+
+    cat > "$ENV_FILE" <<EOF_ENV
+N8N_IMAGE=${n8n_image}
+N8N_PORT=5678
+N8N_LISTEN_ADDRESS=0.0.0.0
+N8N_HOST=0.0.0.0
+N8N_PROTOCOL=http
+N8N_EDITOR_BASE_URL=${n8n_public_url}
+WEBHOOK_URL=${n8n_public_url}/
+N8N_BASIC_AUTH_ACTIVE=true
+N8N_BASIC_AUTH_USER=${n8n_basic_auth_user}
+N8N_BASIC_AUTH_PASSWORD=$N8N_BASIC_AUTH_PASSWORD
+N8N_USER_MANAGEMENT_DISABLED=true
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+N8N_SECURE_COOKIE=false
+N8N_DIAGNOSTICS_ENABLED=false
+N8N_VERSION_NOTIFICATIONS_ENABLED=false
+GENERIC_TIMEZONE=America/New_York
+TZ=America/New_York
+WAZUH_INDEXER_URL=${wazuh_indexer_url}
+WAZUH_INDEXER_USERNAME=${wazuh_indexer_username}
+WAZUH_INDEXER_PASSWORD=$WAZUH_INDEXER_PASSWORD
+WAZUH_INDEXER_INSECURE_TLS=${wazuh_indexer_insecure_tls}
+CLIENT_NAME=${demo_company_name}
+VULN_MIN_SEVERITY=High
+VULN_STATUS=Active
+VULN_MAX_RESULTS=100
+VULN_LOOKBACK_DAYS=0
+VULN_TOP_FINDINGS=15
+TRIAGE_OUTPUT_DIR=/home/node/.n8n/output
+TRIAGE_SAMPLE_FILE=
+ASSET_CRITICALITY_JSON={"wazuh.manager":"critical","db-server":"critical","edge-gateway":"high","pyme-demo-target":"high","docker-host":"high","linux-ui-workstation":"medium","metasploit-node":"low","windows-server":"critical","n8n-automation":"high"}
+ASSET_EXPOSURE_JSON={"edge-gateway":"internet","pyme-demo-target":"internet","db-server":"internal","docker-host":"internal","linux-ui-workstation":"internal","metasploit-node":"lab","windows-server":"internal","n8n-automation":"internet"}
+CISA_KEV_URL=https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+FIRST_EPSS_URL=https://api.first.org/data/v1/epss
+ENRICHMENT_OFFLINE=false
+JIRA_CREATE_TICKETS=false
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=security@example.com
+JIRA_API_TOKEN=change-me-in-password-manager
+JIRA_PROJECT_KEY=SEC
+JIRA_ISSUE_TYPE=Task
+JIRA_MAX_TICKETS=15
+JIRA_DEDUPE=true
+JIRA_PRIORITY_MAP_JSON={"P1":"Highest","P2":"High","P3":"Medium","P4":"Low"}
+AI_ENABLE_ANALYSIS=false
+OPENAI_API_KEY=
+EOF_ENV
+
+    chmod 600 "$ENV_FILE"
+}
+
+write_systemd_service() {
+    cat > "$SERVICE_FILE" <<EOF_SERVICE
+[Unit]
+Description=Wazuh Security n8n automation
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+ExecStartPre=-/usr/bin/docker rm -f wazuh-security-n8n
+ExecStart=/usr/bin/docker run --rm --name wazuh-security-n8n --env-file $ENV_FILE -p ${n8n_port}:5678 -v $DATA_ROOT/home:/home/node/.n8n -v $APP_DIR/workflows:/home/node/.n8n/workflows:ro -v $APP_DIR/scripts:/home/node/.n8n/scripts:ro -v $APP_DIR/samples:/home/node/.n8n/samples:ro -v $DATA_ROOT/output:/home/node/.n8n/output ${n8n_image}
+ExecStop=/usr/bin/docker stop wazuh-security-n8n
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+
+    systemctl daemon-reload
+    systemctl enable wazuh-n8n.service
+    systemctl restart wazuh-n8n.service
+}
+
+import_workflow_once() {
+    for attempt in $(seq 1 90); do
+        if curl -sS --max-time 2 -o /dev/null "http://127.0.0.1:${n8n_port}/"; then
+            echo "n8n HTTP endpoint is ready."
+            break
+        fi
+
+        echo "Waiting for n8n HTTP readiness (attempt $attempt/90)..."
+        sleep 5
+    done
+
+    if [ ! -f "$DATA_ROOT/.workflow_imported" ]; then
+        if docker exec wazuh-security-n8n n8n import:workflow --input=/home/node/.n8n/workflows/wazuh-vulnerability-triage.workflow.json; then
+            touch "$DATA_ROOT/.workflow_imported"
+            echo "n8n workflow imported."
+        else
+            echo "WARNING: n8n workflow import failed. Import manually from /home/node/.n8n/workflows if needed."
+        fi
+    else
+        echo "n8n workflow already imported on this data disk."
+    fi
+}
+
+install_wazuh_agent() {
+    wait_for_manager
+
+    echo "Installing Wazuh agent on n8n host..."
+    curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH \
+        | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+    chmod 644 /usr/share/keyrings/wazuh.gpg
+    echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
+        >/etc/apt/sources.list.d/wazuh.list
+
+    apt-get update
+    if ! WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+         WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+         WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+         DEBIAN_FRONTEND=noninteractive apt-get install -y "wazuh-agent=$WAZUH_VERSION"; then
+        echo "Pinned Wazuh agent $WAZUH_VERSION was unavailable. Installing latest 4.x agent."
+        WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+        WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+        WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y wazuh-agent
+    fi
+
+    apt-mark hold wazuh-agent
+
+    if ! grep -q "n8n-startup.log" /var/ossec/etc/ossec.conf; then
+        cat >>/var/ossec/etc/ossec.conf <<'EOF_OSSEC'
+<ossec_config>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/n8n-startup.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/syslog</location>
+  </localfile>
+
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>900</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <directories realtime="yes" report_changes="yes">/opt/wazuh-n8n</directories>
+    <directories realtime="yes" report_changes="yes">/mnt/disks/n8n-data/home</directories>
+  </syscheck>
+</ossec_config>
+EOF_OSSEC
+    fi
+
+    systemctl enable wazuh-agent
+    systemctl restart wazuh-agent
+}
+
+mount_data_disk
+install_packages
+write_n8n_assets
+write_n8n_env
+write_systemd_service
+import_workflow_once || true
+install_wazuh_agent
+
+echo "n8n automation VM setup completed successfully."

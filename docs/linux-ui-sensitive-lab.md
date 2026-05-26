@@ -8,12 +8,13 @@ En el despliegue GCP actual, Terraform crea esta maquina:
 linux-ui-workstation
 ```
 
-El escritorio usa XFCE + XRDP. La carpeta sensible real es `/Confidencial` y se ve como acceso directo en:
+El escritorio usa XFCE + XRDP. La carpeta sensible real y monitoreada es `/home/esquivel/Confidencial`. Tambien se mantiene `/Confidencial` como enlace de compatibilidad para comandos viejos.
 
 ```text
-/home/analista/Documents/Confidencial
-/home/analista/Documentos/Confidencial
-/home/analista/Desktop/Confidencial
+/home/esquivel/Confidencial
+/home/esquivel/Documents/Confidencial
+/home/esquivel/Documentos/Confidencial
+/home/esquivel/Desktop/Confidencial
 ```
 
 ## Rutas configuradas
@@ -26,7 +27,7 @@ Manager:
 Agente Linux UI:
 
 - Configuracion del agente: `/var/ossec/etc/ossec.conf`
-- Carpeta sensible real: `/Confidencial`
+- Carpeta sensible real: `/home/esquivel/Confidencial`
 - Acceso desde documentos: `~/Documentos/Confidencial` o `~/Documents/Confidencial`
 - Logs de autenticacion: `/var/log/auth.log`
 - Logs de firewall/kernel: `/var/log/kern.log`
@@ -34,7 +35,7 @@ Agente Linux UI:
 
 ## Reglas agregadas
 
-- `100015`, nivel 10: DLP/FIM sobre cambios, creaciones o borrados en `/Confidencial`.
+- `100015`, nivel 10: DLP/FIM sobre cambios, creaciones o borrados en `/home/esquivel/Confidencial`.
 - `100010`, nivel 12: heuristica ransomware, 4 eventos FIM en 10 segundos, MITRE `T1486`.
 - `100020`, nivel 10: autenticacion fallida SSH/su contra el usuario `esquivel`.
 - `100029`, nivel 3: evento base de firewall drop con prefijo `wazuh-fw-drop:`.
@@ -54,7 +55,7 @@ Esto copia `local_rules.xml`, `local_decoder.xml` y reinicia el manager.
 
 ### Opcion A: VM GCP creada por Terraform
 
-Si estas usando la infraestructura de este repo, no tienes que instalarlo manualmente. Terraform ya crea `linux-ui-workstation`, instala XRDP, crea el usuario `analista`, configura Wazuh Agent y prepara `/Confidencial`.
+Si estas usando la infraestructura de este repo, no tienes que instalarlo manualmente. Terraform ya crea `linux-ui-workstation`, instala XRDP, crea el usuario `esquivel`, configura Wazuh Agent y prepara `/home/esquivel/Confidencial`.
 
 Para obtener la IP y comandos:
 
@@ -70,7 +71,7 @@ Para ver credenciales RDP:
 gcloud compute ssh linux-ui-workstation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo cat /root/linux-ui-rdp-credentials.txt"
 ```
 
-Luego abre RDP contra la IP publica y entra con el usuario `analista`.
+Luego abre RDP contra la IP publica y entra con el usuario `esquivel`.
 
 Si tu red bloquea salida directa al puerto `3389`, crea un tunel local y conecta RDP a `localhost:13389`:
 
@@ -89,14 +90,14 @@ sudo bash scripts/setup-linux-ui-sensitive-agent.sh
 Si quieres usar otra ruta sensible:
 
 ```bash
-sudo SENSITIVE_DIR="/Confidencial" bash scripts/setup-linux-ui-sensitive-agent.sh
+sudo SENSITIVE_DIR="/home/esquivel/Confidencial" DESKTOP_USER="esquivel" bash scripts/setup-linux-ui-sensitive-agent.sh
 ```
 
 El script hace esto:
 
-- Crea `/Confidencial`.
+- Crea `/home/esquivel/Confidencial`.
 - Crea un acceso en `~/Documentos/Confidencial` o `~/Documents/Confidencial`.
-- Agrega FIM realtime sobre `/Confidencial`.
+- Agrega FIM realtime sobre `/home/esquivel/Confidencial`.
 - Agrega lectura de `/var/log/auth.log` y `/var/log/kern.log`.
 - Configura `nftables` para loguear y descartar SYN TCP hacia puertos `1-1024`, excepto SSH `22`, con prefijo `wazuh-fw-drop:`.
 - Reinicia `wazuh-agent`.
@@ -106,9 +107,9 @@ El script hace esto:
 En el agente:
 
 ```bash
-sudo sh -c 'echo "cliente=demo" > /Confidencial/cliente-demo.txt'
-sudo sh -c 'echo "actualizado=$(date -Is)" >> /Confidencial/cliente-demo.txt'
-sudo rm -f /Confidencial/cliente-demo.txt
+sudo sh -c 'echo "cliente=demo" > /home/esquivel/Confidencial/cliente-demo.txt'
+sudo sh -c 'echo "actualizado=$(date -Is)" >> /home/esquivel/Confidencial/cliente-demo.txt'
+sudo rm -f /home/esquivel/Confidencial/cliente-demo.txt
 ```
 
 Busqueda en Dashboard:
@@ -128,7 +129,7 @@ sudo /usr/local/bin/simulate-confidential-ransomware-burst.sh
 O desde el repo:
 
 ```bash
-sudo bash scripts/simulate-confidential-ransomware-burst.sh /Confidencial
+sudo bash scripts/simulate-confidential-ransomware-burst.sh /home/esquivel/Confidencial
 ```
 
 Busqueda en Dashboard:

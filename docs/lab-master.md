@@ -6,8 +6,9 @@ El script `scripts/lab-master.ps1` es el panel maestro del laboratorio. Sirve pa
 - Contar cuantas VMs GCP del lab estan corriendo.
 - Contar cuantos contenedores locales Linux/Windows estan corriendo.
 - Encender o apagar Wazuh en GCP.
+- Encender o apagar todas las VMs GCP del lab completo.
 - Crear o destruir la infraestructura GCP con Terraform.
-- Encender, apagar o destruir contenedores locales.
+- Encender, apagar o destruir contenedores locales fallback.
 - Aplicar reglas/configuracion Wazuh e importar dashboards.
 
 ## Modo interactivo
@@ -34,7 +35,7 @@ Para bajar costo sin destruir el laboratorio:
 .\scripts\lab-master.ps1 -Action cost-saver
 ```
 
-Esto detiene los contenedores visibles en el engine Docker actual y apaga `wazuh-server` en GCP.
+Esto detiene los contenedores visibles en el engine Docker actual y apaga las VMs GCP del lab sin destruir discos ni IPs estaticas.
 
 Nota: quedan costos pequenos de disco persistente e IP estatica. Esto conserva el laboratorio para prenderlo rapido.
 
@@ -46,7 +47,7 @@ Para borrar la infraestructura GCP administrada por Terraform:
 .\scripts\lab-master.ps1 -Action destroy-gcp
 ```
 
-Esto elimina Wazuh, disco e IP estatica. Es el modo de menor costo, pero al recrear el manager puede cambiar la IP y tendras que re-enrolar endpoints.
+Esto elimina Wazuh, endpoints, n8n, discos e IPs estaticas. Es el modo de menor costo, pero al recrear el manager puedes perder continuidad del laboratorio.
 
 Para recrear:
 
@@ -57,37 +58,49 @@ Para recrear:
 
 ## Operacion rapida
 
-Encender Wazuh:
-
-```powershell
-.\scripts\lab-master.ps1 -Action start-wazuh
-```
-
-Apagar Wazuh:
-
-```powershell
-.\scripts\lab-master.ps1 -Action stop-wazuh
-```
-
-Encender Wazuh y contenedores Linux:
+Encender lab completo en GCP:
 
 ```powershell
 .\scripts\lab-master.ps1 -Action full-start
 ```
 
-Encender solo endpoints Linux:
+Encender todas las VMs GCP del lab:
+
+```powershell
+.\scripts\lab-master.ps1 -Action start-cloud
+```
+
+Apagar todas las VMs GCP del lab:
+
+```powershell
+.\scripts\lab-master.ps1 -Action stop-cloud
+```
+
+Encender solo Wazuh:
+
+```powershell
+.\scripts\lab-master.ps1 -Action start-wazuh
+```
+
+Apagar solo Wazuh:
+
+```powershell
+.\scripts\lab-master.ps1 -Action stop-wazuh
+```
+
+Encender endpoints Linux locales fallback:
 
 ```powershell
 .\scripts\lab-master.ps1 -Action start-linux
 ```
 
-Apagar endpoints Linux:
+Apagar endpoints Linux locales fallback:
 
 ```powershell
 .\scripts\lab-master.ps1 -Action stop-linux
 ```
 
-Windows usa otro engine de Docker Desktop. Cambia a Windows containers y ejecuta:
+Windows local usa otro engine de Docker Desktop. Para el modo fallback, cambia a Windows containers y ejecuta:
 
 ```powershell
 .\scripts\lab-master.ps1 -Action start-windows

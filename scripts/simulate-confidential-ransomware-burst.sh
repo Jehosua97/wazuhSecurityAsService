@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-TARGET_DIR="${1:-${SENSITIVE_DIR:-/Confidencial}}"
+TARGET_DIR="${1:-${SENSITIVE_DIR:-/home/esquivel/Confidencial}}"
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 
 mkdir -p "$TARGET_DIR"

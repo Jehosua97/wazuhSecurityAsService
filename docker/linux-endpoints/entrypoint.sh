@@ -959,8 +959,8 @@ configure_docker_host() {
 }
 
 provision_linux_ui_workstation() {
-    local lab_user="${LINUX_UI_USER:-analista}"
-    local sensitive_dir="/Confidencial"
+    local lab_user="${LINUX_UI_USER:-esquivel}"
+    local sensitive_dir="${LINUX_UI_SENSITIVE_DIR:-/home/$lab_user/Confidencial}"
     local password_file="/root/linux-ui-rdp-credentials.txt"
 
     if ! id "$lab_user" >/dev/null 2>&1; then
@@ -988,6 +988,13 @@ EOF
     mkdir -p "$sensitive_dir" "/home/$lab_user/Documents" "/home/$lab_user/Documentos" "/home/$lab_user/Desktop" /run/xrdp
     chown root:"$lab_user" "$sensitive_dir"
     chmod 0770 "$sensitive_dir"
+    if [ "$sensitive_dir" != "/Confidencial" ]; then
+        if [ -d /Confidencial ] && [ ! -L /Confidencial ]; then
+            cp -a /Confidencial/. "$sensitive_dir/" 2>/dev/null || true
+            rm -rf /Confidencial
+        fi
+        ln -sfn "$sensitive_dir" /Confidencial
+    fi
     ln -sfn "$sensitive_dir" "/home/$lab_user/Documents/Confidencial"
     ln -sfn "$sensitive_dir" "/home/$lab_user/Documentos/Confidencial"
     ln -sfn "$sensitive_dir" "/home/$lab_user/Desktop/Confidencial"
@@ -1004,7 +1011,7 @@ EOF
     cat >/usr/local/bin/simulate-confidential-ransomware-burst.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-TARGET_DIR="${1:-/Confidencial}"
+TARGET_DIR="${1:-${LINUX_UI_SENSITIVE_DIR:-/home/${LINUX_UI_USER:-esquivel}/Confidencial}}"
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 mkdir -p "$TARGET_DIR"
 for i in $(seq 1 6); do
@@ -1046,6 +1053,9 @@ EOF
 }
 
 configure_linux_ui_workstation() {
+    local lab_user="${LINUX_UI_USER:-esquivel}"
+    local sensitive_dir="${LINUX_UI_SENSITIVE_DIR:-/home/$lab_user/Confidencial}"
+
     append_ossec_config "LOCAL_DOCKER_LINUX_UI" '<ossec_config>
   <localfile>
     <log_format>syslog</log_format>
@@ -1061,13 +1071,16 @@ configure_linux_ui_workstation() {
     <scan_on_start>yes</scan_on_start>
     <alert_new_files>yes</alert_new_files>
     <auto_ignore frequency="10" timeframe="3600">no</auto_ignore>
-    <directories realtime="yes" report_changes="yes" check_all="yes">/Confidencial</directories>
+    <directories realtime="yes" report_changes="yes" check_all="yes">'$sensitive_dir'</directories>
     <directories realtime="yes" report_changes="yes" check_all="yes">/opt/wazuh-module-demo</directories>
   </syscheck>
 </ossec_config>'
 }
 
 run_initial_events() {
+    local linux_ui_user="${LINUX_UI_USER:-esquivel}"
+    local linux_ui_sensitive_dir="${LINUX_UI_SENSITIVE_DIR:-/home/$linux_ui_user/Confidencial}"
+
     /usr/local/bin/wazuh-demo-generate-module-events.sh || true
 
     case "$PROFILE" in
@@ -1077,7 +1090,8 @@ run_initial_events() {
         db-server) /usr/local/bin/db-demo-generate-events.sh || true ;;
         docker-host) /usr/local/bin/docker-demo-generate-events.sh || true ;;
         linux-ui-workstation)
-            echo "created_at=$(date -Is)" >>/Confidencial/initial-access-review.txt
+            mkdir -p "$linux_ui_sensitive_dir"
+            echo "created_at=$(date -Is)" >>"$linux_ui_sensitive_dir/initial-access-review.txt"
             /usr/local/bin/linux-ui-demo-auth-failure.sh || true
             /usr/local/bin/linux-ui-demo-portscan-log.sh || true
             ;;

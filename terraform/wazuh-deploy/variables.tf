@@ -134,7 +134,12 @@ variable "linux_ui_boot_disk_size" {
 
 variable "linux_ui_user" {
   description = "Local desktop/RDP user created on the Linux UI endpoint"
-  default     = "analista"
+  default     = "esquivel"
+}
+
+variable "linux_ui_sensitive_dir" {
+  description = "Sensitive folder monitored by FIM on the Linux UI endpoint"
+  default     = "/home/esquivel/Confidencial"
 }
 
 variable "enable_windows_server" {
@@ -161,6 +166,85 @@ variable "windows_boot_disk_size" {
 variable "windows_image" {
   description = "GCP image family used by the monitored Windows Server endpoint"
   default     = "projects/windows-cloud/global/images/family/windows-2022"
+}
+
+variable "enable_n8n" {
+  description = "Create a persistent n8n automation VM in GCP, connected privately to the Wazuh Indexer."
+  type        = bool
+  default     = false
+}
+
+variable "n8n_instance_name" {
+  description = "Name of the n8n automation VM"
+  default     = "n8n-automation"
+}
+
+variable "n8n_machine_type" {
+  description = "Machine type for the n8n automation VM"
+  default     = "e2-small"
+}
+
+variable "n8n_boot_disk_size" {
+  description = "Boot disk size in GB for the n8n automation VM"
+  default     = 20
+}
+
+variable "n8n_data_disk_size" {
+  description = "Persistent data disk size in GB for n8n workflows, credentials, SQLite DB and evidence output"
+  default     = 20
+}
+
+variable "n8n_image" {
+  description = "Container image used by the n8n automation VM"
+  default     = "n8nio/n8n:1.94.1"
+}
+
+variable "n8n_port" {
+  description = "Public TCP port exposed by n8n"
+  default     = 5678
+}
+
+variable "n8n_source_ranges" {
+  description = "CIDR ranges allowed to reach n8n. Replace 0.0.0.0/0 with your public IP for safer internet access."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "n8n_basic_auth_user" {
+  description = "Basic auth username for the public n8n UI"
+  default     = "admin"
+}
+
+variable "n8n_basic_auth_password" {
+  description = "Optional fixed basic auth password for n8n. Leave empty to generate and persist one on the n8n data disk."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "n8n_encryption_key" {
+  description = "Optional fixed n8n encryption key. Leave empty to generate and persist one on the n8n data disk."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "n8n_wazuh_indexer_username" {
+  description = "Wazuh Indexer username used by the n8n vulnerability triage workflow"
+  default     = "admin"
+}
+
+variable "n8n_wazuh_indexer_password" {
+  description = "Wazuh Indexer password used by the n8n vulnerability triage workflow"
+  type        = string
+  default     = "SecretPassword"
+  sensitive   = true
+}
+
+variable "n8n_wazuh_indexer_insecure_tls" {
+  description = "Allow n8n triage script to connect to the self-signed Wazuh Indexer TLS certificate"
+  type        = bool
+  default     = true
 }
 
 variable "demo_company_name" {
