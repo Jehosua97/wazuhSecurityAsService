@@ -243,7 +243,7 @@ El script de vulnerabilidades crea tickets para todos los hallazgos priorizados,
 
 ## Activar analisis IA para tickets de alertas
 
-El script de alertas puede llamar a ChatGPT/OpenAI antes de crear el issue y pegar la respuesta dentro del ticket en la seccion `Analisis IA (ChatGPT)`.
+El workflow de alertas tiene un nodo visible llamado `ChatGPT SOC Analysis`. Ese nodo llama a ChatGPT/OpenAI antes de crear el issue y pega la respuesta dentro del ticket en la seccion `Analisis IA (ChatGPT)`.
 
 ```env
 AI_ENABLE_ANALYSIS=true
@@ -259,6 +259,12 @@ AI_TIMEOUT_MS=60000
 La IA recibe la alerta normalizada de Wazuh: prioridad, regla, nivel, agente, IPs, puertos, usuarios, ruta FIM, grupos, MITRE, `full_log` y eventos relacionados. El prompt le pide actuar como analista senior SOC y producir pasos detallados de validacion, contencion, investigacion, mitigacion, recuperacion y prevencion.
 
 Mantener `AI_ENABLE_ANALYSIS=false` para pruebas sin costo o cuando no haya `OPENAI_API_KEY`.
+
+El workflow queda dividido visualmente asi:
+
+```text
+Collect Wazuh Alerts -> ChatGPT SOC Analysis -> Create Jira Tickets -> Jira Ticket Links
+```
 
 ## Modo sample sin Wazuh
 

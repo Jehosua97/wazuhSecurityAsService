@@ -7,6 +7,7 @@ const https = require("https");
 const crypto = require("crypto");
 
 const OUTPUT_DIR = process.env.TRIAGE_OUTPUT_DIR || "/home/node/.n8n/output";
+const LATEST_OUTPUT_FILE = path.join(OUTPUT_DIR, "alert-jira-triage-latest.json");
 
 function env(name, fallback = "") {
   const value = process.env[name];
@@ -222,6 +223,14 @@ async function loadWazuhAlerts() {
     insecureTls: envBool("WAZUH_INDEXER_INSECURE_TLS", true),
     timeoutMs: 45000,
   });
+}
+
+function loadAutomationResultFromFile() {
+  const inputFile = env("ALERT_INPUT_FILE", LATEST_OUTPUT_FILE);
+  if (!fs.existsSync(inputFile)) {
+    throw new Error(`ALERT_INPUT_FILE does not exist: ${inputFile}`);
+  }
+  return JSON.parse(fs.readFileSync(inputFile, "utf8"));
 }
 
 function triggerReason(source, priority, derivedFromLevel) {
@@ -477,7 +486,7 @@ async function generateAiAnalysis(alert) {
 }
 
 async function enrichAlertsWithAi(alerts) {
-  const enabled = envBool("AI_ENABLE_ANALYSIS", false);
+  const enabled = envBool("AI_ENABLE_ANALYSIS", true);
   if (!enabled) return alerts;
 
   const maxAnalyses = envNumber("AI_MAX_ANALYSES", envNumber("JIRA_ALERT_MAX_TICKETS", 15));
@@ -703,7 +712,7 @@ function writeOutputs(result) {
   const stamp = new Date().toISOString().replace(/[-:.]/g, "").replace("T", "T").replace("Z", "Z");
   const jsonPath = path.join(OUTPUT_DIR, `alert-jira-triage-${stamp}.json`);
   const mdPath = path.join(OUTPUT_DIR, `alert-jira-triage-${stamp}.md`);
-  const latestJson = path.join(OUTPUT_DIR, "alert-jira-triage-latest.json");
+  const latestJson = LATEST_OUTPUT_FILE;
   const latestMd = path.join(OUTPUT_DIR, "alert-jira-triage-latest.md");
   result.outputFiles = { jsonPath, mdPath, latestJson, latestMd };
   const json = JSON.stringify(result, null, 2);
@@ -714,19 +723,14 @@ function writeOutputs(result) {
   fs.writeFileSync(latestMd, md);
 }
 
-async function main() {
-  const generatedAt = new Date().toISOString();
-  const wazuhResponse = await loadWazuhAlerts();
-  const rawAlertCount = (((wazuhResponse || {}).hits || {}).hits || []).length;
-  const alerts = await enrichAlertsWithAi(normalizeAlerts(wazuhResponse));
+function buildResult({ generatedAt, rawAlertCount, alerts, jiraResults = [] }) {
   const countsByPriority = alerts.reduce((acc, alert) => {
     acc[alert.priority] = (acc[alert.priority] || 0) + 1;
     return acc;
   }, {});
-  const jiraResults = await createJiraAlertTickets(alerts);
   const aiGenerated = alerts.filter((alert) => (alert.aiAnalysis || {}).action === "generated").length;
 
-  const result = {
+  return {
     clientName: env("CLIENT_NAME", "Demo PYME"),
     generatedAt,
     wazuhIndex: env("ALERT_WAZUH_INDEX", "wazuh-alerts-*"),
@@ -748,6 +752,66 @@ async function main() {
     jiraResults,
     alerts,
   };
+}
+
+async function collectAlertsOnly() {
+  const generatedAt = new Date().toISOString();
+  const wazuhResponse = await loadWazuhAlerts();
+  const rawAlertCount = (((wazuhResponse || {}).hits || {}).hits || []).length;
+  return buildResult({
+    generatedAt,
+    rawAlertCount,
+    alerts: normalizeAlerts(wazuhResponse),
+    jiraResults: [],
+  });
+}
+
+async function applyAiOnly() {
+  const existing = loadAutomationResultFromFile();
+  const alerts = await enrichAlertsWithAi(existing.alerts || []);
+  return buildResult({
+    generatedAt: existing.generatedAt || new Date().toISOString(),
+    rawAlertCount: existing.rawAlertCount || alerts.length,
+    alerts,
+    jiraResults: existing.jiraResults || [],
+  });
+}
+
+async function createJiraOnly() {
+  const existing = loadAutomationResultFromFile();
+  const alerts = existing.alerts || [];
+  const jiraResults = await createJiraAlertTickets(alerts);
+  return buildResult({
+    generatedAt: existing.generatedAt || new Date().toISOString(),
+    rawAlertCount: existing.rawAlertCount || alerts.length,
+    alerts,
+    jiraResults,
+  });
+}
+
+async function main() {
+  const mode = env("ALERT_AUTOMATION_MODE", "all").toLowerCase();
+  let result;
+
+  if (mode === "collect") {
+    result = await collectAlertsOnly();
+  } else if (mode === "ai") {
+    result = await applyAiOnly();
+  } else if (mode === "jira") {
+    result = await createJiraOnly();
+  } else if (mode === "all") {
+    const collected = await collectAlertsOnly();
+    const alerts = await enrichAlertsWithAi(collected.alerts || []);
+    const jiraResults = await createJiraAlertTickets(alerts);
+    result = buildResult({
+      generatedAt: collected.generatedAt,
+      rawAlertCount: collected.rawAlertCount,
+      alerts,
+      jiraResults,
+    });
+  } else {
+    throw new Error(`Unsupported ALERT_AUTOMATION_MODE: ${mode}`);
+  }
 
   writeOutputs(result);
   console.log(JSON.stringify(result, null, 2));

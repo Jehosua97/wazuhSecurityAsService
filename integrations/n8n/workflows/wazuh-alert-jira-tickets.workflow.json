@@ -10,7 +10,7 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -620,
+        -920,
         -120
       ]
     },
@@ -30,64 +30,118 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -620,
+        -920,
         80
       ]
     },
     {
       "parameters": {
-        "command": "node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js"
+        "command": "sh -lc 'ALERT_AUTOMATION_MODE=collect node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js'"
       },
-      "id": "run-alert-ticket-script",
-      "name": "Run Wazuh Alert Jira Tickets",
+      "id": "collect-wazuh-alerts",
+      "name": "Collect Wazuh Alerts",
       "type": "n8n-nodes-base.executeCommand",
       "typeVersion": 1,
       "position": [
-        -320,
+        -620,
         -20
       ],
-      "notes": "Creates Jira tickets for Wazuh alerts classified as P1/P2/P3. If AI_ENABLE_ANALYSIS=true, the script calls OpenAI/ChatGPT and embeds mitigation guidance in each ticket. Credentials and tuning live in integrations/n8n/.env."
+      "notes": "Queries wazuh-alerts-* and stores grouped P1/P2/P3 alerts in /home/node/.n8n/output/alert-jira-triage-latest.json."
     },
     {
       "parameters": {
-        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', ...parsed, stderr: $json.stderr || '' } }];"
+        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', stage: 'collect', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', stage: 'collect', ...parsed, stderr: $json.stderr || '' } }];"
       },
-      "id": "parse-summary",
-      "name": "Parse Summary",
+      "id": "parse-alerts",
+      "name": "Parse Wazuh Alerts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -40,
+        -340,
         -20
       ]
     },
     {
       "parameters": {
-        "jsCode": "const results = $json.jiraResults || [];\nconst ticketLinks = results\n  .filter((item) => item.issueUrl)\n  .map((item) => ({\n    key: item.key || '',\n    url: item.issueUrl,\n    action: item.action,\n    priority: item.priority,\n    ruleId: item.ruleId,\n    agentName: item.agentName,\n  }));\n\nreturn [{\n  json: {\n    ...$json,\n    ticketLinks,\n    ticketLinkSummary: ticketLinks.length\n      ? ticketLinks.map((item) => `${item.priority} ${item.ruleId} ${item.key}: ${item.url}`).join('\\n')\n      : 'No Jira ticket links returned. Check JIRA_CREATE_ALERT_TICKETS and Jira credentials.',\n  },\n}];"
+        "command": "sh -lc 'ALERT_AUTOMATION_MODE=ai node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js'"
+      },
+      "id": "chatgpt-soc-analysis",
+      "name": "ChatGPT SOC Analysis",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -20
+      ],
+      "notes": "Visible AI stage. If AI_ENABLE_ANALYSIS=true, this calls OpenAI/ChatGPT with Wazuh evidence and writes the mitigation analysis back into the latest alert triage JSON."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', stage: 'ai', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', stage: 'ai', ...parsed, stderr: $json.stderr || '' } }];"
+      },
+      "id": "parse-ai-summary",
+      "name": "Parse AI Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "command": "sh -lc 'ALERT_AUTOMATION_MODE=jira node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js'"
+      },
+      "id": "create-jira-tickets",
+      "name": "Create Jira Tickets",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        540,
+        -20
+      ],
+      "notes": "Creates or deduplicates Jira tickets from the latest enriched alert triage JSON. If ChatGPT generated analysis, it is embedded in the Jira description."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', stage: 'jira', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', stage: 'jira', ...parsed, stderr: $json.stderr || '' } }];"
+      },
+      "id": "parse-jira-summary",
+      "name": "Parse Jira Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $json.jiraResults || [];\nconst ticketLinks = results\n  .filter((item) => item.issueUrl)\n  .map((item) => ({\n    key: item.key || '',\n    url: item.issueUrl,\n    action: item.action,\n    priority: item.priority,\n    ruleId: item.ruleId,\n    agentName: item.agentName,\n    aiAnalysis: item.aiAnalysis || 'disabled',\n  }));\n\nreturn [{\n  json: {\n    ...$json,\n    ticketLinks,\n    ticketLinkSummary: ticketLinks.length\n      ? ticketLinks.map((item) => `${item.priority} ${item.ruleId} ${item.key}: ${item.url} (AI: ${item.aiAnalysis})`).join('\\n')\n      : 'No Jira ticket links returned. Check JIRA_CREATE_ALERT_TICKETS, Jira credentials, and dedupe settings.',\n  },\n}];"
       },
       "id": "jira-ticket-links",
       "name": "Jira Ticket Links",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        260,
+        1100,
         -20
       ],
-      "notes": "Collects direct Jira URLs returned by the alert ticket script."
+      "notes": "Collects direct Jira URLs returned by the ticket creation stage."
     },
     {
       "parameters": {
-        "content": "## Wazuh Alert Jira Tickets\n\n1. Queries `wazuh-alerts-*`.\n2. Selects alerts tagged `incident_priority_p1`, `incident_priority_p2`, or `incident_priority_p3`.\n3. Groups duplicate alerts by rule, agent, IP/user/path.\n4. If `AI_ENABLE_ANALYSIS=true`, sends Wazuh evidence to OpenAI/ChatGPT for mitigation guidance.\n5. Creates one Jira ticket per grouped incident.\n6. Ticket description includes Wazuh evidence plus `Analisis IA (ChatGPT)` when enabled.\n\nKeep Jira/OpenAI credentials in `.env`, not in this workflow.",
-        "height": 320,
-        "width": 460
+        "content": "## Wazuh Alert Jira Tickets\n\n1. Collect Wazuh P1/P2/P3 alerts.\n2. Parse grouped incidents.\n3. Run `ChatGPT SOC Analysis` as a visible AI stage.\n4. Create or deduplicate Jira tickets.\n5. Return direct Jira links.\n\n`ChatGPT SOC Analysis` calls OpenAI only when `AI_ENABLE_ANALYSIS=true` and `OPENAI_API_KEY` is configured. The AI response is inserted into Jira under `Analisis IA (ChatGPT)`.",
+        "height": 340,
+        "width": 500
       },
       "id": "workflow-note",
       "name": "Workflow Notes",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -660,
-        -520
+        -920,
+        -560
       ]
     }
   ],
@@ -96,7 +150,7 @@
       "main": [
         [
           {
-            "node": "Run Wazuh Alert Jira Tickets",
+            "node": "Collect Wazuh Alerts",
             "type": "main",
             "index": 0
           }
@@ -107,25 +161,69 @@
       "main": [
         [
           {
-            "node": "Run Wazuh Alert Jira Tickets",
+            "node": "Collect Wazuh Alerts",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Run Wazuh Alert Jira Tickets": {
+    "Collect Wazuh Alerts": {
       "main": [
         [
           {
-            "node": "Parse Summary",
+            "node": "Parse Wazuh Alerts",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parse Summary": {
+    "Parse Wazuh Alerts": {
+      "main": [
+        [
+          {
+            "node": "ChatGPT SOC Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChatGPT SOC Analysis": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Summary": {
+      "main": [
+        [
+          {
+            "node": "Create Jira Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Jira Tickets": {
+      "main": [
+        [
+          {
+            "node": "Parse Jira Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Jira Summary": {
       "main": [
         [
           {
@@ -150,10 +248,13 @@
       "name": "jira"
     },
     {
+      "name": "chatgpt"
+    },
+    {
       "name": "alert-triage"
     }
   ],
   "triggerCount": 0,
   "updatedAt": "2026-05-27T00:00:00.000Z",
-  "versionId": "wazuh-alert-jira-p1-p2-p3"
+  "versionId": "wazuh-alert-jira-p1-p2-p3-chatgpt-visible"
 }

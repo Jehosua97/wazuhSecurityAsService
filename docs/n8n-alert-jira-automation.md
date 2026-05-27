@@ -23,14 +23,16 @@ n8n
   Manual / cada 15 minutos
         |
         v
-Script de alertas
-  integrations/n8n/scripts/wazuh-alert-jira-tickets.js
+Collect Wazuh Alerts
         |
-        +--> filtra P1/P2/P3
-        +--> agrupa duplicados por regla, agente, IP, usuario y path
-        +--> genera evidencia JSON/Markdown
-        +--> crea o reutiliza ticket Jira
-        +--> devuelve links directos al ticket
+        v
+ChatGPT SOC Analysis
+        |
+        v
+Create Jira Tickets
+        |
+        v
+Jira Ticket Links
 ```
 
 ## Variables principales
@@ -126,7 +128,9 @@ Cada issue incluye:
 
 ## Modulo IA con ChatGPT
 
-El modulo IA vive dentro del script `integrations/n8n/scripts/wazuh-alert-jira-tickets.js`, antes de la creacion del ticket. El flujo es:
+El modulo IA aparece como nodo visible en el workflow: `ChatGPT SOC Analysis`. Internamente ejecuta el script `integrations/n8n/scripts/wazuh-alert-jira-tickets.js` en modo `ALERT_AUTOMATION_MODE=ai`, antes de la creacion del ticket.
+
+El flujo tecnico es:
 
 ```text
 Alerta Wazuh normalizada
@@ -142,6 +146,15 @@ Analisis IA (ChatGPT)
         |
         v
 Descripcion del ticket Jira
+```
+
+El script soporta estos modos para que n8n pueda mostrar cada etapa:
+
+```env
+ALERT_AUTOMATION_MODE=collect  # recolecta y agrupa alertas Wazuh
+ALERT_AUTOMATION_MODE=ai       # ejecuta ChatGPT SOC Analysis
+ALERT_AUTOMATION_MODE=jira     # crea o reutiliza tickets Jira
+ALERT_AUTOMATION_MODE=all      # modo CLI completo, usado por defecto
 ```
 
 Prompt base:
