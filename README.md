@@ -100,14 +100,17 @@ Estado actual objetivo: Wazuh, endpoints Linux, Windows Server y n8n pueden vivi
         |
         v
 +------------------------------------------------------------------+
-|              Automatizacion MSSP / Vulnerability Triage           |
+|              Automatizacion MSSP / n8n SOC Automation             |
 |  - n8n-automation en GCP con IP publica estatica                  |
 |  - Disco persistente para workflows, credenciales y evidencia     |
 |  - Wazuh Indexer query: wazuh-states-vulnerabilities*             |
+|  - Wazuh Indexer query: wazuh-alerts-*                            |
 |  - CISA KEV + FIRST EPSS enrichment                               |
-|  - Priorizacion P1-P4                                             |
-|  - Evidencia Markdown/JSON                                        |
-|  - Jira Cloud tickets opcionales                                  |
+|  - Vulnerability triage P1-P4                                     |
+|  - Alertas P1/P2/P3 -> Jira Cloud                                 |
+|  - ChatGPT SOC Analysis opcional                                  |
+|  - Telegram P1/P2 Alert opcional                                  |
+|  - Evidencia Markdown/JSON persistente                            |
 +------------------------------------------------------------------+
 ```
 
@@ -129,9 +132,10 @@ Estado actual objetivo: Wazuh, endpoints Linux, Windows Server y n8n pueden vivi
 - `scripts/import-wazuh-dashboards.ps1`: importa dashboards SOC al dashboard.
 - `scripts/setup-linux-ui-sensitive-agent.sh`: configura el escenario Linux UI con carpeta sensible `/Confidencial`.
 - `scripts/simulate-confidential-ransomware-burst.sh`: genera rafaga FIM segura para el escenario de ransomware heuristico.
-- `docker-compose.n8n.yml`: fallback local para automatizacion de vulnerabilidades.
-- `integrations/n8n`: workflow, script, variables de ejemplo y evidencia de triage de vulnerabilidades.
-- `docs/n8n-vulnerability-automation.md`: guia rapida de automatizacion Wazuh + n8n + KEV/EPSS + Jira.
+- `docker-compose.n8n.yml`: fallback local para automatizacion n8n.
+- `integrations/n8n`: workflows, scripts, variables de ejemplo, samples y evidencia para vulnerabilidades, Jira, ChatGPT y Telegram.
+- `docs/n8n-vulnerability-automation.md`: guia rapida de triage de vulnerabilidades Wazuh + n8n + KEV/EPSS + Jira.
+- `docs/n8n-alert-jira-automation.md`: guia de tickets Jira por alertas P1/P2/P3, analisis ChatGPT y notificaciones Telegram P1/P2.
 - `docs/`: documentacion tecnica, playbooks, runbooks y guias actuales.
 
 ## Componentes a desarrollar
@@ -410,6 +414,7 @@ Esta es la seccion operativa principal para el equipo. Si alguien nuevo entra al
 | Ver URL n8n cloud | `terraform -chdir=terraform/wazuh-deploy output n8n_url` |
 | Ver password n8n cloud | `terraform -chdir=terraform/wazuh-deploy output -raw n8n_credentials_command` |
 | Ejecutar triage n8n cloud | `terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_triage_command` |
+| Ejecutar tickets de alertas n8n cloud | `terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_alert_tickets_command` |
 | Levantar n8n local fallback | `.\scripts\n8n-security-automation.ps1 -Action up` |
 
 Notas:
@@ -426,7 +431,7 @@ Notas:
 | `scripts/local-docker-lab.ps1` | Operacion directa de Docker Compose para endpoints locales. | `-Scope Linux -Action up`, `-Scope Linux -Action logs -Follow` |
 | `scripts/apply-wazuh-config.ps1` | Copia reglas, decoders, listas, Active Response y `ossec.conf` al manager. | `.\scripts\apply-wazuh-config.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a"` |
 | `scripts/import-wazuh-dashboards.ps1` | Importa dashboards SOC y de modulos Wazuh. | `.\scripts\import-wazuh-dashboards.ps1 -ProjectId "wazuh-iac-on-gcp" -Zone "us-central1-a" -DashboardUser "admin" -DashboardPassword $env:WAZUH_DASHBOARD_PASSWORD` |
-| `scripts/n8n-security-automation.ps1` | Opera n8n local fallback, importa workflow y corre triage de vulnerabilidades. | `-Action up`, `-Action import-workflow`, `-Action run-triage` |
+| `scripts/n8n-security-automation.ps1` | Opera n8n local fallback, importa workflows y corre triage de vulnerabilidades o tickets de alertas. | `-Action up`, `-Action import-workflows`, `-Action run-triage`, `-Action run-alert-tickets` |
 | `scripts/start-wazuh-indexer-tunnel.ps1` | Abre tunel SSH local hacia Wazuh Indexer solo para n8n local fallback. | `.\scripts\start-wazuh-indexer-tunnel.ps1` |
 
 Acciones disponibles en `local-docker-lab.ps1`:
@@ -519,9 +524,44 @@ ansible-playbook -i inventories\vagrant.yml playbooks\04-run-demo-events.yml
 
 Archivo principal: `ansible/windows-ad-lab/README.md`.
 
-### Automatizacion n8n de vulnerabilidades
+### Automatizacion n8n SOC
 
-Este modulo convierte vulnerabilidades detectadas por Wazuh en prioridades operativas y tickets Jira opcionales.
+El modulo n8n convierte datos de Wazuh en acciones operativas para el SOC. Vive en una VM persistente `n8n-automation` dentro de GCP y tambien puede correr localmente como fallback con Docker Compose.
+
+Flujos implementados:
+
+1. `Wazuh Vulnerability Triage - KEV EPSS Jira`: consulta `wazuh-states-vulnerabilities*`, enriquece CVEs con CISA KEV y FIRST EPSS, calcula prioridad `P1` a `P4`, genera evidencia Markdown/JSON y puede crear tickets Jira.
+2. `Wazuh Alert Jira Tickets - P1 P2 P3`: consulta `wazuh-alerts-*`, toma alertas etiquetadas con `incident_priority_p1`, `incident_priority_p2` o `incident_priority_p3`, agrupa duplicados y crea tickets Jira con contexto SOC.
+3. `ChatGPT SOC Analysis`: etapa visible dentro del workflow de alertas. Envia a OpenAI la evidencia estructurada de Wazuh y agrega la respuesta al ticket Jira bajo `Analisis IA (ChatGPT)`.
+4. `Telegram P1/P2 Alert`: etapa visible dentro del workflow de alertas. Envia notificaciones Telegram para prioridades `P1` y `P2`, con deduplicacion para evitar spam.
+
+Flujo visual del workflow de alertas:
+
+```text
+Manual Trigger / Every 15 Minutes
+  -> Collect Wazuh Alerts
+  -> Parse Wazuh Alerts
+  -> ChatGPT SOC Analysis
+  -> Parse AI Summary
+  -> Create Jira Tickets
+  -> Parse Jira Summary
+  -> Telegram P1/P2 Alert
+  -> Parse Telegram Summary
+  -> Jira Ticket Links
+```
+
+Archivos principales:
+
+| Archivo | Uso |
+| --- | --- |
+| `integrations/n8n/workflows/wazuh-vulnerability-triage.workflow.json` | Workflow de vulnerabilidades. |
+| `integrations/n8n/workflows/wazuh-alert-jira-tickets.workflow.json` | Workflow de alertas P1/P2/P3, ChatGPT, Jira y Telegram. |
+| `integrations/n8n/scripts/wazuh-vulnerability-triage.js` | Consulta vulnerabilidades, calcula prioridad, genera evidencia y tickets Jira. |
+| `integrations/n8n/scripts/wazuh-alert-jira-tickets.js` | Consulta alertas, ejecuta ChatGPT, crea tickets Jira y envia Telegram. |
+| `integrations/n8n/.env.example` | Plantilla de variables. No poner secretos reales aqui. |
+| `integrations/n8n/samples/` | Samples para probar sin consultar Wazuh. |
+| `integrations/n8n/output/` | Evidencia generada por ejecuciones locales. No se commitea. |
+| `terraform/wazuh-deploy/scripts/n8n_startup.sh.tftpl` | Startup cloud que instala Docker, n8n, workflows, scripts, samples y agente Wazuh. |
 
 Modo GCP persistente:
 
@@ -529,9 +569,64 @@ Modo GCP persistente:
 terraform -chdir=terraform/wazuh-deploy output n8n_url
 terraform -chdir=terraform/wazuh-deploy output -raw n8n_credentials_command
 terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_triage_command
+terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_alert_tickets_command
 ```
 
-En este modo n8n vive en `n8n-automation`, usa disco persistente y consulta el Wazuh Indexer por IP privada. No necesita tunel local.
+En este modo n8n vive en `n8n-automation`, usa disco persistente `n8n-automation-data`, reinicia con systemd, consulta el Wazuh Indexer por IP privada y queda monitoreado por su propio agente Wazuh. El `.env` real de produccion vive en:
+
+```text
+/opt/wazuh-n8n/.env
+```
+
+Editar secretos en GCP:
+
+```powershell
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo nano /opt/wazuh-n8n/.env"
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo systemctl restart wazuh-n8n"
+```
+
+Variables importantes para Jira:
+
+```env
+JIRA_CREATE_TICKETS=false
+JIRA_CREATE_ALERT_TICKETS=true
+JIRA_BASE_URL=https://wazuhaservice.atlassian.net
+JIRA_EMAIL=tu-correo-atlassian
+JIRA_API_TOKEN=tu-token-jira
+JIRA_PROJECT_KEY=KAN
+JIRA_ISSUE_TYPE=Task
+JIRA_ALERT_MAX_TICKETS=15
+JIRA_ALERT_DEDUPE=true
+```
+
+Variables importantes para ChatGPT/OpenAI:
+
+```env
+AI_ENABLE_ANALYSIS=true
+OPENAI_API_KEY=tu-openai-api-key
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+AI_MAX_OUTPUT_TOKENS=1200
+AI_MAX_CHARS=8000
+AI_MAX_ANALYSES=1
+AI_TIMEOUT_MS=90000
+```
+
+`AI_MAX_ANALYSES=1` es recomendado para demo si aparece `HTTP 429` por limites de OpenAI. Aumentarlo gradualmente cuando billing, cuota y rate limits esten estables.
+
+Variables importantes para Telegram:
+
+```env
+TELEGRAM_ENABLE_ALERTS=true
+TELEGRAM_BOT_TOKEN=tu-token-de-bot
+TELEGRAM_CHAT_ID=tu-chat-id
+TELEGRAM_ALERT_PRIORITIES=P1,P2
+TELEGRAM_MAX_ALERTS=10
+TELEGRAM_DEDUPE=true
+TELEGRAM_DEDUPE_TTL_HOURS=24
+```
+
+Para Telegram: crea el bot con `@BotFather`, manda un mensaje al bot, consulta `https://api.telegram.org/botTU_TOKEN/getUpdates` y copia `chat.id`.
 
 Fallback local:
 
@@ -539,8 +634,20 @@ Fallback local:
 Copy-Item integrations\n8n\.env.example integrations\n8n\.env
 .\scripts\start-wazuh-indexer-tunnel.ps1
 .\scripts\n8n-security-automation.ps1 -Action up
-.\scripts\n8n-security-automation.ps1 -Action import-workflow
+.\scripts\n8n-security-automation.ps1 -Action import-workflows
 .\scripts\n8n-security-automation.ps1 -Action run-triage
+.\scripts\n8n-security-automation.ps1 -Action run-alert-tickets
+```
+
+Para probar sin Wazuh real:
+
+```env
+TRIAGE_SAMPLE_FILE=/home/node/.n8n/samples/wazuh-vulnerabilities-sample.json
+ALERT_SAMPLE_FILE=/home/node/.n8n/samples/wazuh-alerts-sample.json
+JIRA_CREATE_TICKETS=false
+JIRA_CREATE_ALERT_TICKETS=false
+AI_ENABLE_ANALYSIS=false
+TELEGRAM_ENABLE_ALERTS=false
 ```
 
 Salida esperada:
@@ -548,9 +655,30 @@ Salida esperada:
 ```text
 integrations/n8n/output/vulnerability-triage-latest.json
 integrations/n8n/output/vulnerability-triage-latest.md
+integrations/n8n/output/alert-jira-triage-latest.json
+integrations/n8n/output/alert-jira-triage-latest.md
+integrations/n8n/output/telegram-alerts-state.json
 ```
 
-Documentacion: `integrations/n8n/README.md` y `docs/n8n-vulnerability-automation.md`.
+Seguridad:
+
+- No pegar `OPENAI_API_KEY`, `JIRA_API_TOKEN` ni `TELEGRAM_BOT_TOKEN` en `.env.example`, scripts, docs ni Terraform templates.
+- Para GCP, los secretos van solo en `/opt/wazuh-n8n/.env`.
+- Para local, los secretos van solo en `integrations/n8n/.env`, que no debe commitearse.
+- Mantener `n8n_source_ranges = ["TU_IP_PUBLICA/32"]` para uso real; `0.0.0.0/0` solo para demo rapida.
+- No abrir el puerto `9200` del Wazuh Indexer a internet; n8n cloud lo consulta por red privada.
+
+Troubleshooting rapido:
+
+| Sintoma | Revision |
+| --- | --- |
+| Jira no crea tickets | `JIRA_CREATE_ALERT_TICKETS=true`, `JIRA_PROJECT_KEY=KAN`, issue type `Task`, token con permisos de crear issues. |
+| ChatGPT muestra `HTTP 429` | Revisar billing/cuota/rate limits de OpenAI y bajar `AI_MAX_ANALYSES=1`. |
+| Telegram no envia | Verificar `TELEGRAM_ENABLE_ALERTS=true`, token, `chat_id`, que el usuario haya escrito al bot y que no este deduplicado. |
+| No hay alertas | Aumentar `ALERT_LOOKBACK_MINUTES`, generar ruido reciente o revisar grupos `incident_priority_p1/p2/p3`. |
+| n8n local no conecta al indexer | Abrir `.\scripts\start-wazuh-indexer-tunnel.ps1` y usar `https://host.docker.internal:9200`. |
+
+Documentacion extendida: `integrations/n8n/README.md`, `docs/n8n-vulnerability-automation.md` y `docs/n8n-alert-jira-automation.md`.
 
 ## Cómo ejecutar la demo
 
@@ -749,6 +877,7 @@ Documentos existentes:
 - `docs/wazuh-soc-dashboards.md`
 - `docs/wazuh-agent-modules-demo.md`
 - `docs/n8n-vulnerability-automation.md`
+- `docs/n8n-alert-jira-automation.md`
 - `integrations/n8n/README.md`
 
 Documentos por crear:
