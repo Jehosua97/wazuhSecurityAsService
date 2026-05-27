@@ -124,6 +124,10 @@ function requestJson(url, options = {}) {
   });
 }
 
+function openAiModel() {
+  return env("OPENAI_MODEL", "gpt-4o-mini");
+}
+
 function priorityGroup(priority) {
   return `incident_priority_${priority.toLowerCase()}`;
 }
@@ -356,6 +360,169 @@ function jiraLabels(alert) {
   ];
 }
 
+function aiSystemPrompt() {
+  return env(
+    "AI_SYSTEM_PROMPT",
+    [
+      "Eres un analista senior de ciberseguridad y respuesta a incidentes.",
+      "Recibiras una alerta estructurada de Wazuh con evidencia tecnica como regla, prioridad, agente, IPs, puertos, usuarios, rutas, logs, grupos y MITRE.",
+      "Responde en espanol con recomendaciones concretas para un ticket SOC.",
+      "Usa solo la evidencia proporcionada; no inventes IPs, usuarios, puertos, hashes, CVEs ni tecnologias que no aparezcan.",
+      "Si falta un dato, dilo claramente como No disponible.",
+      "Incluye pasos detallados y accionables para validar, contener, investigar, mitigar, recuperar y prevenir recurrencia.",
+      "Distingue entre actividad simulada/lab y actividad potencialmente maliciosa cuando la evidencia lo indique.",
+      "No reveles secretos ni pidas credenciales en texto plano.",
+    ].join(" ")
+  );
+}
+
+function aiAlertPayload(alert) {
+  return {
+    cliente: alert.clientName,
+    prioridad: alert.priority,
+    motivo_del_ticket: alert.triggerReason,
+    regla_wazuh: {
+      id: alert.ruleId,
+      nivel: alert.ruleLevel,
+      descripcion: alert.ruleDescription,
+      grupos: alert.ruleGroups,
+      mitre: alert.mitre,
+    },
+    agente_afectado: {
+      id: alert.agentId,
+      nombre: alert.agentName,
+      ip: alert.agentIp,
+      manager: alert.managerName,
+    },
+    tiempos: {
+      primera_vez_observada: alert.firstSeen || alert.timestamp,
+      ultima_vez_observada: alert.lastSeen || alert.timestamp,
+      eventos_agrupados: alert.count,
+    },
+    indicadores: {
+      ip_origen: alert.srcip,
+      ip_destino: alert.dstip,
+      puerto_origen: alert.srcport,
+      puerto_destino: alert.dstport,
+      usuario_origen: alert.srcuser,
+      usuario_destino: alert.dstuser,
+      ruta_fim: alert.syscheckPath,
+      decoder: alert.decoder,
+      programa: alert.programName,
+      ubicacion_log: alert.location,
+    },
+    evidencia: {
+      full_log: alert.fullLog,
+      eventos_relacionados_previos: alert.previousOutput,
+    },
+  };
+}
+
+function aiUserPrompt(alert) {
+  return [
+    "Analiza esta alerta de Wazuh y genera una guia de respuesta para pegar en un ticket Jira.",
+    "",
+    "Formato requerido:",
+    "1. Diagnostico breve",
+    "2. Riesgo e impacto probable",
+    "3. Pasos inmediatos de contencion",
+    "4. Investigacion tecnica paso a paso",
+    "5. Mitigacion o solucion recomendada",
+    "6. Validacion posterior",
+    "7. Evidencia adicional que conviene recolectar",
+    "",
+    "Alerta Wazuh en JSON:",
+    JSON.stringify(aiAlertPayload(alert), null, 2),
+  ].join("\n");
+}
+
+function extractOpenAiText(response) {
+  if (typeof response.output_text === "string" && response.output_text.trim()) {
+    return response.output_text.trim();
+  }
+
+  const chunks = [];
+  for (const item of response.output || []) {
+    for (const content of item.content || []) {
+      if (typeof content.text === "string") chunks.push(content.text);
+      if (typeof content.output_text === "string") chunks.push(content.output_text);
+    }
+  }
+  return chunks.join("\n").trim();
+}
+
+async function generateAiAnalysis(alert) {
+  const apiKey = env("OPENAI_API_KEY", "");
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+
+  const baseUrl = env("OPENAI_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, "");
+  const response = await requestJson(`${baseUrl}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+    },
+    body: {
+      model: openAiModel(),
+      instructions: aiSystemPrompt(),
+      input: aiUserPrompt(alert),
+      max_output_tokens: envNumber("AI_MAX_OUTPUT_TOKENS", 1200),
+    },
+    timeoutMs: envNumber("AI_TIMEOUT_MS", 60000),
+  });
+
+  const text = extractOpenAiText(response);
+  if (!text) throw new Error("OpenAI response did not include text output");
+  return text.slice(0, envNumber("AI_MAX_CHARS", 8000));
+}
+
+async function enrichAlertsWithAi(alerts) {
+  const enabled = envBool("AI_ENABLE_ANALYSIS", false);
+  if (!enabled) return alerts;
+
+  const maxAnalyses = envNumber("AI_MAX_ANALYSES", envNumber("JIRA_ALERT_MAX_TICKETS", 15));
+  const enriched = [];
+
+  for (const [index, alert] of alerts.entries()) {
+    const nextAlert = Object.assign({}, alert);
+    if (index >= maxAnalyses) {
+      nextAlert.aiAnalysis = {
+        enabled: true,
+        provider: "openai",
+        model: openAiModel(),
+        action: "skipped-limit",
+        message: `AI_MAX_ANALYSES=${maxAnalyses} reached`,
+      };
+      enriched.push(nextAlert);
+      continue;
+    }
+
+    try {
+      nextAlert.aiAnalysis = {
+        enabled: true,
+        provider: "openai",
+        model: openAiModel(),
+        action: "generated",
+        text: await generateAiAnalysis(alert),
+      };
+    } catch (error) {
+      nextAlert.aiAnalysis = {
+        enabled: true,
+        provider: "openai",
+        model: openAiModel(),
+        action: "error",
+        error: error.message,
+        body: error.body || "",
+      };
+      console.error(`WARN: AI analysis failed for alert ${alert.keyHash}: ${error.message}`);
+    }
+
+    enriched.push(nextAlert);
+  }
+
+  return enriched;
+}
+
 function jiraDescriptionText(alert) {
   const lines = [
     `Cliente: ${alert.clientName}`,
@@ -389,6 +556,22 @@ function jiraDescriptionText(alert) {
 
   if (alert.previousOutput) {
     lines.push("", "Eventos relacionados previos", alert.previousOutput);
+  }
+
+  if ((alert.aiAnalysis || {}).text) {
+    lines.push(
+      "",
+      "Analisis IA (ChatGPT)",
+      "Nota: generado automaticamente a partir de la evidencia Wazuh. Validar antes de ejecutar cambios en produccion.",
+      "",
+      alert.aiAnalysis.text
+    );
+  } else if ((alert.aiAnalysis || {}).error) {
+    lines.push(
+      "",
+      "Analisis IA (ChatGPT)",
+      `No disponible. Error al generar analisis: ${alert.aiAnalysis.error}`
+    );
   }
 
   lines.push(
@@ -438,13 +621,13 @@ async function createJiraAlertTickets(alerts) {
   for (const alert of alerts.slice(0, maxTickets)) {
     const summary = `[${alert.priority}] Wazuh ${alert.ruleId}: ${alert.ruleDescription} - ${alert.agentName}`;
     if (!enabled) {
-      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "dry-run", summary, issueUrl: "" });
+      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "dry-run", summary, issueUrl: "", aiAnalysis: (alert.aiAnalysis || {}).action || "disabled" });
       continue;
     }
 
     const existingIssue = await findExistingJiraIssue(alert);
     if (existingIssue) {
-      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "skipped-existing", ...existingIssue });
+      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "skipped-existing", aiAnalysis: (alert.aiAnalysis || {}).action || "disabled", ...existingIssue });
       continue;
     }
 
@@ -467,9 +650,9 @@ async function createJiraAlertTickets(alerts) {
 
     try {
       const response = await jiraRequest("/rest/api/3/issue", { method: "POST", body: { fields } });
-      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "created", key: response.key, self: response.self, issueUrl: jiraIssueUrl(response.key) });
+      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "created", aiAnalysis: (alert.aiAnalysis || {}).action || "disabled", key: response.key, self: response.self, issueUrl: jiraIssueUrl(response.key) });
     } catch (error) {
-      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "error", error: error.message, body: error.body || "" });
+      results.push({ keyHash: alert.keyHash, priority: alert.priority, ruleId: alert.ruleId, agentName: alert.agentName, action: "error", aiAnalysis: (alert.aiAnalysis || {}).action || "disabled", error: error.message, body: error.body || "" });
     }
   }
 
@@ -492,6 +675,8 @@ function markdownSummary(result) {
     `- P2: ${result.countsByPriority.P2 || 0}`,
     `- P3: ${result.countsByPriority.P3 || 0}`,
     `- Jira creation enabled: ${result.jiraCreateTickets}`,
+    `- AI analysis enabled: ${result.ai.enabled}`,
+    `- AI analyses generated: ${result.ai.generated}`,
     "",
     "## Alerts",
     "",
@@ -506,6 +691,7 @@ function markdownSummary(result) {
     lines.push(`- Source IP: ${alert.srcip || "N/A"}`);
     lines.push(`- User: ${alert.srcuser || alert.dstuser || "N/A"}`);
     lines.push(`- Log: ${alert.fullLog || "N/A"}`);
+    lines.push(`- AI analysis: ${(alert.aiAnalysis || {}).action || "disabled"}`);
     lines.push("");
   }
 
@@ -532,12 +718,13 @@ async function main() {
   const generatedAt = new Date().toISOString();
   const wazuhResponse = await loadWazuhAlerts();
   const rawAlertCount = (((wazuhResponse || {}).hits || {}).hits || []).length;
-  const alerts = normalizeAlerts(wazuhResponse);
+  const alerts = await enrichAlertsWithAi(normalizeAlerts(wazuhResponse));
   const countsByPriority = alerts.reduce((acc, alert) => {
     acc[alert.priority] = (acc[alert.priority] || 0) + 1;
     return acc;
   }, {});
   const jiraResults = await createJiraAlertTickets(alerts);
+  const aiGenerated = alerts.filter((alert) => (alert.aiAnalysis || {}).action === "generated").length;
 
   const result = {
     clientName: env("CLIENT_NAME", "Demo PYME"),
@@ -550,6 +737,13 @@ async function main() {
     },
     rawAlertCount,
     countsByPriority,
+    ai: {
+      enabled: envBool("AI_ENABLE_ANALYSIS", false),
+      provider: "openai",
+      model: openAiModel(),
+      maxAnalyses: envNumber("AI_MAX_ANALYSES", envNumber("JIRA_ALERT_MAX_TICKETS", 15)),
+      generated: aiGenerated,
+    },
     jiraCreateTickets: envBool("JIRA_CREATE_ALERT_TICKETS", envBool("JIRA_CREATE_TICKETS", false)),
     jiraResults,
     alerts,

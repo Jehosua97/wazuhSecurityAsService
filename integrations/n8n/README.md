@@ -241,6 +241,25 @@ JIRA_ALERT_DEDUPE=true
 
 El script de vulnerabilidades crea tickets para todos los hallazgos priorizados, limitado por `JIRA_MAX_TICKETS`. El script de alertas crea tickets para `P1`, `P2` y `P3`, limitado por `JIRA_ALERT_MAX_TICKETS`. Cada ticket creado o detectado por deduplicacion devuelve `issueUrl` y el workflow lo resume en el nodo `Jira Ticket Links`.
 
+## Activar analisis IA para tickets de alertas
+
+El script de alertas puede llamar a ChatGPT/OpenAI antes de crear el issue y pegar la respuesta dentro del ticket en la seccion `Analisis IA (ChatGPT)`.
+
+```env
+AI_ENABLE_ANALYSIS=true
+OPENAI_API_KEY=CAMBIAR_EN_PASSWORD_MANAGER
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+AI_MAX_OUTPUT_TOKENS=1200
+AI_MAX_CHARS=8000
+AI_MAX_ANALYSES=15
+AI_TIMEOUT_MS=60000
+```
+
+La IA recibe la alerta normalizada de Wazuh: prioridad, regla, nivel, agente, IPs, puertos, usuarios, ruta FIM, grupos, MITRE, `full_log` y eventos relacionados. El prompt le pide actuar como analista senior SOC y producir pasos detallados de validacion, contencion, investigacion, mitigacion, recuperacion y prevencion.
+
+Mantener `AI_ENABLE_ANALYSIS=false` para pruebas sin costo o cuando no haya `OPENAI_API_KEY`.
+
 ## Modo sample sin Wazuh
 
 Para validar n8n, scoring y evidencia sin abrir el tunel a Wazuh, configura:

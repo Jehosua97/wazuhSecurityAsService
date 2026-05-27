@@ -46,7 +46,7 @@
         -320,
         -20
       ],
-      "notes": "Creates Jira tickets for Wazuh alerts classified as P1/P2/P3. Credentials and tuning live in integrations/n8n/.env."
+      "notes": "Creates Jira tickets for Wazuh alerts classified as P1/P2/P3. If AI_ENABLE_ANALYSIS=true, the script calls OpenAI/ChatGPT and embeds mitigation guidance in each ticket. Credentials and tuning live in integrations/n8n/.env."
     },
     {
       "parameters": {
@@ -77,7 +77,7 @@
     },
     {
       "parameters": {
-        "content": "## Wazuh Alert Jira Tickets\n\n1. Queries `wazuh-alerts-*`.\n2. Selects alerts tagged `incident_priority_p1`, `incident_priority_p2`, or `incident_priority_p3`.\n3. Groups duplicate alerts by rule, agent, IP/user/path.\n4. Creates one Jira ticket per grouped incident.\n5. Ticket description explains what happened, why the ticket was triggered, evidence, MITRE, affected asset, and recommended action.\n\nKeep Jira credentials in `.env`, not in this workflow.",
+        "content": "## Wazuh Alert Jira Tickets\n\n1. Queries `wazuh-alerts-*`.\n2. Selects alerts tagged `incident_priority_p1`, `incident_priority_p2`, or `incident_priority_p3`.\n3. Groups duplicate alerts by rule, agent, IP/user/path.\n4. If `AI_ENABLE_ANALYSIS=true`, sends Wazuh evidence to OpenAI/ChatGPT for mitigation guidance.\n5. Creates one Jira ticket per grouped incident.\n6. Ticket description includes Wazuh evidence plus `Analisis IA (ChatGPT)` when enabled.\n\nKeep Jira/OpenAI credentials in `.env`, not in this workflow.",
         "height": 320,
         "width": 460
       },

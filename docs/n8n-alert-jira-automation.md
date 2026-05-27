@@ -55,9 +55,20 @@ JIRA_ALERT_DEDUPE=true
 JIRA_SET_PRIORITY_FIELD=true
 JIRA_DESCRIPTION_FORMAT=adf
 JIRA_PRIORITY_MAP_JSON={"P1":"Highest","P2":"High","P3":"Medium","P4":"Low"}
+
+AI_ENABLE_ANALYSIS=false
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+AI_MAX_OUTPUT_TOKENS=1200
+AI_MAX_CHARS=8000
+AI_MAX_ANALYSES=15
+AI_TIMEOUT_MS=60000
+OPENAI_API_KEY=
 ```
 
 `JIRA_CREATE_ALERT_TICKETS=false` deja el flujo en modo dry-run: no crea tickets, pero genera evidencia y muestra que tickets habria creado.
+
+`AI_ENABLE_ANALYSIS=false` deja apagado el modulo de IA. Cuando se configura en `true`, el script envia a OpenAI la evidencia de Wazuh ya normalizada y agrega la respuesta en Jira bajo la seccion `Analisis IA (ChatGPT)`.
 
 ## Como probar sin Jira real
 
@@ -110,7 +121,59 @@ Cada issue incluye:
 - IPs, usuarios, ruta FIM, decoder y ubicacion del log cuando existen;
 - evidencia `full_log` y eventos relacionados;
 - mapeo MITRE cuando Wazuh lo incluye;
+- analisis IA opcional con pasos detallados de mitigacion y validacion;
 - acciones recomendadas para validar, contener y documentar.
+
+## Modulo IA con ChatGPT
+
+El modulo IA vive dentro del script `integrations/n8n/scripts/wazuh-alert-jira-tickets.js`, antes de la creacion del ticket. El flujo es:
+
+```text
+Alerta Wazuh normalizada
+        |
+        v
+Prompt SOC + evidencia JSON
+        |
+        v
+OpenAI Responses API
+        |
+        v
+Analisis IA (ChatGPT)
+        |
+        v
+Descripcion del ticket Jira
+```
+
+Prompt base:
+
+```text
+Eres un analista senior de ciberseguridad y respuesta a incidentes.
+Recibiras una alerta estructurada de Wazuh con evidencia tecnica como regla,
+prioridad, agente, IPs, puertos, usuarios, rutas, logs, grupos y MITRE.
+Usa solo la evidencia proporcionada; no inventes datos.
+Incluye pasos detallados para validar, contener, investigar, mitigar,
+recuperar y prevenir recurrencia.
+```
+
+Para activarlo en la VM:
+
+```powershell
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo nano /opt/wazuh-n8n/.env"
+```
+
+Configura:
+
+```env
+AI_ENABLE_ANALYSIS=true
+OPENAI_API_KEY=tu_openai_api_key
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Luego reinicia:
+
+```powershell
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo systemctl restart wazuh-n8n"
+```
 
 ## Deduplicacion
 
