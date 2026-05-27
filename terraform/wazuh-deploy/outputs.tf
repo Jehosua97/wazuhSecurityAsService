@@ -53,6 +53,11 @@ output "n8n_run_triage_command" {
   value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo docker exec wazuh-security-n8n node /home/node/.n8n/scripts/wazuh-vulnerability-triage.js\"" : null
 }
 
+output "n8n_run_alert_tickets_command" {
+  description = "Command to run the Wazuh alert-to-Jira ticket script inside the cloud n8n container"
+  value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo docker exec wazuh-security-n8n node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js\"" : null
+}
+
 output "n8n_logs_command" {
   description = "Command to inspect the n8n container logs on the cloud VM"
   value       = var.enable_n8n ? "gcloud compute ssh ${var.n8n_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo docker logs --tail 120 wazuh-security-n8n\"" : null
@@ -90,7 +95,7 @@ output "juice_shop_url" {
 
 output "metasploit_public_ip" {
   description = "Public IP of the monitored Metasploit endpoint"
-  value       = var.enable_gcp_endpoints ? google_compute_instance.metasploit_endpoint[0].network_interface[0].access_config[0].nat_ip : null
+  value       = var.enable_gcp_endpoints && var.metasploit_assign_public_ip ? google_compute_instance.metasploit_endpoint[0].network_interface[0].access_config[0].nat_ip : null
 }
 
 output "metasploit_agent_name" {
@@ -106,6 +111,31 @@ output "metasploit_console_command" {
 output "metasploit_demo_event_command" {
   description = "Command to generate controlled Metasploit endpoint telemetry"
   value       = var.enable_gcp_endpoints ? "gcloud compute ssh ${var.metasploit_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/metasploit-demo-generate-events.sh\"" : "docker compose -f docker-compose.endpoints.yml exec ${var.metasploit_instance_name} /usr/local/bin/metasploit-demo-generate-events.sh"
+}
+
+output "kali_public_ip" {
+  description = "Public IP of the monitored Kali attacker endpoint"
+  value       = var.enable_gcp_endpoints && var.enable_kali_endpoint ? google_compute_instance.kali_endpoint[0].network_interface[0].access_config[0].nat_ip : null
+}
+
+output "kali_private_ip" {
+  description = "Private IP of the monitored Kali attacker endpoint"
+  value       = var.enable_gcp_endpoints && var.enable_kali_endpoint ? google_compute_instance.kali_endpoint[0].network_interface[0].network_ip : null
+}
+
+output "kali_agent_name" {
+  description = "Agent name expected in the Wazuh dashboard for the Kali attacker endpoint"
+  value       = var.kali_instance_name
+}
+
+output "kali_shell_command" {
+  description = "SSH command to open the Kali container shell on the monitored endpoint"
+  value       = var.enable_gcp_endpoints && var.enable_kali_endpoint ? "gcloud compute ssh ${var.kali_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/kali-lab-shell\"" : null
+}
+
+output "kali_demo_event_command" {
+  description = "Command to generate controlled Kali reconnaissance telemetry and scan the Linux UI endpoint"
+  value       = var.enable_gcp_endpoints && var.enable_kali_endpoint ? "gcloud compute ssh ${var.kali_instance_name} --project=${var.project_id} --zone=${var.zone} --command=\"sudo /usr/local/bin/kali-demo-generate-events.sh\"" : null
 }
 
 output "edge_gateway_public_ip" {

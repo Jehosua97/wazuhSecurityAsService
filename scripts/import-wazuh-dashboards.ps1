@@ -222,6 +222,12 @@ $savedObjects = @(
         -Query 'agent.name: "metasploit-node" and rule.groups: metasploit_endpoint'),
 
     (New-WazuhSearchObject `
+        -Id "soc-ops-kali-attacker" `
+        -Title "SOC Operativo - Actividad kali-attacker" `
+        -Description "Actividad controlada del endpoint Kali monitoreado." `
+        -Query 'agent.name: "kali-attacker" and rule.groups: (kali_endpoint or reconnaissance or active_scanning or port_scan)'),
+
+    (New-WazuhSearchObject `
         -Id "soc-ops-edge-gateway" `
         -Title "SOC Operativo - Actividad edge-gateway" `
         -Description "Actividad de firewall y VPN del edge gateway." `
@@ -290,7 +296,35 @@ $savedObjects = @(
         -Id "soc-modules-container-cloud" `
         -Title "SOC Modulos Wazuh - Contenedores y Cloud" `
         -Description "Docker listener en docker-host y telemetria cloud GCP simulada de forma segura." `
-        -Query 'rule.groups: (wazuh_agent_container_security or docker or wazuh_agent_cloud_security or cloud_security)' `
+        -Query 'rule.groups: (wazuh_agent_container_security or docker or docker_host or container_platform or wazuh_agent_cloud_security or cloud_security)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-docker-cloud-overview" `
+        -Title "SOC Docker y Cloud Security - Vista general" `
+        -Description "Vista combinada para explicar Docker listener, Docker lab telemetry y Cloud Security GCP." `
+        -Query 'rule.groups: (wazuh_agent_container_security or docker or docker_host or container_platform or wazuh_agent_cloud_security or cloud_security)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-docker-runtime" `
+        -Title "SOC Docker y Cloud Security - Runtime Docker" `
+        -Description "Eventos del runtime Docker: reinicios, pulls de imagenes y cambios en workloads." `
+        -Query 'agent.name: "docker-host" and rule.groups: (wazuh_agent_container_security or docker or docker_host or container_platform or container_runtime or image_supply_chain)' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-docker-config-drift" `
+        -Title "SOC Docker y Cloud Security - Drift de configuracion" `
+        -Description "FIM sobre archivos usados por contenedores y cambios de configuracion del host Docker." `
+        -Query 'agent.name: "docker-host" and (rule.groups: configuration_change or syscheck.path: "/opt/docker-lab*" or syscheck.path: "/etc/docker*")' `
+        -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "syscheck.path", "full_log")),
+
+    (New-WazuhSearchObject `
+        -Id "soc-cloud-gcp-demo" `
+        -Title "SOC Docker y Cloud Security - GCP Cloud Security" `
+        -Description "Eventos GCP simulados para demostrar cambios IAM y cambios de compute." `
+        -Query 'rule.groups: (wazuh_agent_cloud_security or cloud_security or gcp or iam_change or compute_change)' `
         -Columns @("timestamp", "agent.name", "rule.level", "rule.id", "rule.description", "full_log")),
 
     (New-WazuhDashboardObject `
@@ -312,9 +346,10 @@ $savedObjects = @(
             [ordered]@{ searchId = "soc-ops-incidentes-correlacionados"; x = 0;  y = 0;  w = 48; h = 12 },
             [ordered]@{ searchId = "soc-ops-infra-incidentes"; x = 0;  y = 12; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-ops-pyme-target"; x = 24; y = 12; w = 24; h = 12 },
-            [ordered]@{ searchId = "soc-ops-metasploit"; x = 0;  y = 24; w = 16; h = 12 },
-            [ordered]@{ searchId = "soc-ops-edge-gateway"; x = 16; y = 24; w = 16; h = 12 },
-            [ordered]@{ searchId = "soc-ops-db-server"; x = 32; y = 24; w = 16; h = 12 },
+            [ordered]@{ searchId = "soc-ops-metasploit"; x = 0;  y = 24; w = 12; h = 12 },
+            [ordered]@{ searchId = "soc-ops-kali-attacker"; x = 12; y = 24; w = 12; h = 12 },
+            [ordered]@{ searchId = "soc-ops-edge-gateway"; x = 24; y = 24; w = 12; h = 12 },
+            [ordered]@{ searchId = "soc-ops-db-server"; x = 36; y = 24; w = 12; h = 12 },
             [ordered]@{ searchId = "soc-ops-docker-host"; x = 0;  y = 36; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-ops-windows-server"; x = 24; y = 36; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-ops-linux-ui-sensitive"; x = 0; y = 48; w = 48; h = 12 }
@@ -331,6 +366,17 @@ $savedObjects = @(
             [ordered]@{ searchId = "soc-modules-inventory-vuln-rootcheck"; x = 0;  y = 24; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-modules-active-response"; x = 24; y = 24; w = 24; h = 12 },
             [ordered]@{ searchId = "soc-modules-container-cloud"; x = 0;  y = 36; w = 48; h = 12 }
+        )),
+
+    (New-WazuhDashboardObject `
+        -Id "soc-docker-cloud-security-dashboard" `
+        -Title "SOC Docker y Cloud Security - Visual" `
+        -Description "Dashboard visual para explicar el modulo Docker de Cloud Security y eventos cloud GCP del laboratorio." `
+        -Panels @(
+            [ordered]@{ searchId = "soc-docker-cloud-overview"; x = 0;  y = 0;  w = 48; h = 12 },
+            [ordered]@{ searchId = "soc-docker-runtime"; x = 0;  y = 12; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-docker-config-drift"; x = 24; y = 12; w = 24; h = 12 },
+            [ordered]@{ searchId = "soc-cloud-gcp-demo"; x = 0;  y = 24; w = 48; h = 12 }
         ))
 )
 
@@ -392,3 +438,4 @@ if (-not $DashboardBaseUrl) {
 Write-Host "Executive dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-ejecutivo-dashboard"
 Write-Host "Operational dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-operativo-dashboard"
 Write-Host "Wazuh modules dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-modulos-wazuh-dashboard"
+Write-Host "Docker and Cloud Security dashboard URL: $DashboardBaseUrl/app/dashboards#/view/soc-docker-cloud-security-dashboard"

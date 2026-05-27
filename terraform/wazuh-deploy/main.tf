@@ -111,6 +111,7 @@ resource "google_compute_firewall" "admin_ssh_firewall" {
     var.enable_gcp_endpoints ? [
       "vulnerable-target",
       "metasploit-endpoint",
+      "kali-endpoint",
       "edge-gateway",
       "db-server",
       "docker-host",
@@ -246,6 +247,53 @@ resource "google_compute_instance" "metasploit_endpoint" {
     wazuh_version             = var.wazuh_version
     metasploit_workspace_name = var.metasploit_workspace_name
   }), "\r\n", "\n")
+}
+
+# Monitored Kali attacker endpoint used to run controlled scans from inside the lab VPC.
+resource "google_compute_instance" "kali_endpoint" {
+  count = var.enable_gcp_endpoints && var.enable_kali_endpoint ? 1 : 0
+
+  name         = var.kali_instance_name
+  machine_type = var.kali_machine_type
+  zone         = var.zone
+
+  labels = {
+    environment = var.environment
+    solution    = "wazuh-pyme-mx"
+    role        = "kali-attacker"
+  }
+
+  boot_disk {
+    initialize_params {
+      image = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts"
+      size  = var.kali_boot_disk_size
+    }
+  }
+
+  network_interface {
+    network    = google_compute_network.vpc_wazuh.self_link
+    subnetwork = google_compute_subnetwork.vpc_wazuh_subnet.self_link
+
+    dynamic "access_config" {
+      for_each = var.metasploit_assign_public_ip ? [1] : []
+      content {}
+    }
+  }
+
+  tags = ["kali-endpoint", "red-team-lab", "offensive-workstation"]
+
+  metadata_startup_script = replace(templatefile("./scripts/kali_startup.sh.tftpl", {
+    wazuh_manager_ip    = google_compute_instance.wazuh_server.network_interface[0].network_ip
+    wazuh_agent_name    = var.kali_instance_name
+    wazuh_version       = var.wazuh_version
+    kali_container      = var.kali_container_image
+    scan_target_ip      = var.kali_default_scan_target_ip
+    scan_target_http_ip = var.kali_default_http_target_ip
+  }), "\r\n", "\n")
+
+  depends_on = [
+    google_compute_instance.wazuh_server,
+  ]
 }
 
 # Monitored edge gateway endpoint with firewall and VPN telemetry.
@@ -520,6 +568,9 @@ resource "google_compute_instance" "n8n_server" {
     n8n_triage_script_b64      = filebase64("${path.module}/../../integrations/n8n/scripts/wazuh-vulnerability-triage.js")
     n8n_workflow_b64           = filebase64("${path.module}/../../integrations/n8n/workflows/wazuh-vulnerability-triage.workflow.json")
     n8n_sample_b64             = filebase64("${path.module}/../../integrations/n8n/samples/wazuh-vulnerabilities-sample.json")
+    n8n_alert_script_b64       = filebase64("${path.module}/../../integrations/n8n/scripts/wazuh-alert-jira-tickets.js")
+    n8n_alert_workflow_b64     = filebase64("${path.module}/../../integrations/n8n/workflows/wazuh-alert-jira-tickets.workflow.json")
+    n8n_alert_sample_b64       = filebase64("${path.module}/../../integrations/n8n/samples/wazuh-alerts-sample.json")
   }), "\r\n", "\n")
 
   depends_on = [google_compute_instance.wazuh_server]

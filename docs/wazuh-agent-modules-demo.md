@@ -21,12 +21,14 @@ Dashboard visible:
 
 ```text
 SOC Modulos Wazuh - Demo tecnico
+SOC Docker y Cloud Security - Visual
 ```
 
 URL esperada:
 
 ```text
 https://<WAZUH_IP>/app/dashboards#/view/soc-modulos-wazuh-dashboard
+https://<WAZUH_IP>/app/dashboards#/view/soc-docker-cloud-security-dashboard
 ```
 
 ## Modulos configurados
@@ -49,6 +51,8 @@ https://<WAZUH_IP>/app/dashboards#/view/soc-modulos-wazuh-dashboard
 - `docker/linux-endpoints/entrypoint.sh`
 - `docker/linux-endpoints/Dockerfile`
 - `docker-compose.endpoints.yml`
+- `terraform/wazuh-deploy/scripts/docker_host_startup.sh.tftpl`
+- `scripts/configure-docker-cloud-security-agent.sh`
 - `terraform/config/wazuh-manager/etc/rules/local_rules.xml`
 - `terraform/config/wazuh-manager/etc/ossec.conf`
 - `terraform/config/wazuh-manager/active-response/bin/module-demo-response.sh`
@@ -86,6 +90,12 @@ docker compose -f docker-compose.endpoints.yml exec edge-gateway /usr/local/bin/
 docker compose -f docker-compose.endpoints.yml exec db-server /usr/local/bin/wazuh-demo-generate-module-events.sh
 docker compose -f docker-compose.endpoints.yml exec docker-host /usr/local/bin/wazuh-demo-generate-module-events.sh
 docker compose -f docker-compose.endpoints.yml exec linux-ui-workstation /usr/local/bin/wazuh-demo-generate-module-events.sh
+```
+
+Ejecutar la demo equivalente en la VM `docker-host` de GCP:
+
+```powershell
+gcloud compute ssh docker-host --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo /usr/local/bin/docker-cloud-security-demo.sh"
 ```
 
 El script genera:
@@ -156,6 +166,12 @@ Cloud security demo:
 
 ```text
 rule.groups: wazuh_agent_cloud_security
+```
+
+Docker + Cloud Security visual:
+
+```text
+rule.groups: (wazuh_agent_container_security or docker or docker_host or container_platform or wazuh_agent_cloud_security or cloud_security)
 ```
 
 ## Validacion tecnica en contenedor

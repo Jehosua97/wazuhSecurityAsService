@@ -1,0 +1,159 @@
+{
+  "id": "wazuh-alert-jira-tickets",
+  "name": "Wazuh Alert Jira Tickets - P1 P2 P3",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "alert-schedule",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "command": "node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js"
+      },
+      "id": "run-alert-ticket-script",
+      "name": "Run Wazuh Alert Jira Tickets",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -20
+      ],
+      "notes": "Creates Jira tickets for Wazuh alerts classified as P1/P2/P3. Credentials and tuning live in integrations/n8n/.env."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', ...parsed, stderr: $json.stderr || '' } }];"
+      },
+      "id": "parse-summary",
+      "name": "Parse Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $json.jiraResults || [];\nconst ticketLinks = results\n  .filter((item) => item.issueUrl)\n  .map((item) => ({\n    key: item.key || '',\n    url: item.issueUrl,\n    action: item.action,\n    priority: item.priority,\n    ruleId: item.ruleId,\n    agentName: item.agentName,\n  }));\n\nreturn [{\n  json: {\n    ...$json,\n    ticketLinks,\n    ticketLinkSummary: ticketLinks.length\n      ? ticketLinks.map((item) => `${item.priority} ${item.ruleId} ${item.key}: ${item.url}`).join('\\n')\n      : 'No Jira ticket links returned. Check JIRA_CREATE_ALERT_TICKETS and Jira credentials.',\n  },\n}];"
+      },
+      "id": "jira-ticket-links",
+      "name": "Jira Ticket Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        -20
+      ],
+      "notes": "Collects direct Jira URLs returned by the alert ticket script."
+    },
+    {
+      "parameters": {
+        "content": "## Wazuh Alert Jira Tickets\n\n1. Queries `wazuh-alerts-*`.\n2. Selects alerts tagged `incident_priority_p1`, `incident_priority_p2`, or `incident_priority_p3`.\n3. Groups duplicate alerts by rule, agent, IP/user/path.\n4. Creates one Jira ticket per grouped incident.\n5. Ticket description explains what happened, why the ticket was triggered, evidence, MITRE, affected asset, and recommended action.\n\nKeep Jira credentials in `.env`, not in this workflow.",
+        "height": 320,
+        "width": 460
+      },
+      "id": "workflow-note",
+      "name": "Workflow Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        -520
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Wazuh Alert Jira Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Run Wazuh Alert Jira Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Wazuh Alert Jira Tickets": {
+      "main": [
+        [
+          {
+            "node": "Parse Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Summary": {
+      "main": [
+        [
+          {
+            "node": "Jira Ticket Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "wazuh"
+    },
+    {
+      "name": "jira"
+    },
+    {
+      "name": "alert-triage"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-05-27T00:00:00.000Z",
+  "versionId": "wazuh-alert-jira-p1-p2-p3"
+}

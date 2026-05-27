@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("up", "down", "restart", "status", "logs", "import-workflow", "run-triage")]
+    [ValidateSet("up", "down", "restart", "status", "logs", "import-workflow", "import-alert-workflow", "import-workflows", "run-triage", "run-alert-tickets")]
     [string]$Action = "status",
 
     [switch]$Follow
@@ -13,7 +13,9 @@ $ComposeFile = Join-Path $RepoRoot "docker-compose.n8n.yml"
 $EnvFile = Join-Path $RepoRoot "integrations\n8n\.env"
 $EnvExample = Join-Path $RepoRoot "integrations\n8n\.env.example"
 $WorkflowPath = "/home/node/.n8n/workflows/wazuh-vulnerability-triage.workflow.json"
+$AlertWorkflowPath = "/home/node/.n8n/workflows/wazuh-alert-jira-tickets.workflow.json"
 $TriageScript = "/home/node/.n8n/scripts/wazuh-vulnerability-triage.js"
+$AlertScript = "/home/node/.n8n/scripts/wazuh-alert-jira-tickets.js"
 
 function Test-Tool {
     param([string]$Name)
@@ -77,10 +79,29 @@ switch ($Action) {
         Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "n8n", "import:workflow", "--input=$WorkflowPath")
         Write-Host "Workflow importado. Abre http://localhost:5678 y revisa: Wazuh Vulnerability Triage - KEV EPSS Jira"
     }
+    "import-alert-workflow" {
+        Ensure-EnvFile
+        Invoke-Compose -ComposeArgs @("up", "-d")
+        Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "n8n", "import:workflow", "--input=$AlertWorkflowPath")
+        Write-Host "Workflow importado. Abre http://localhost:5678 y revisa: Wazuh Alert Jira Tickets - P1 P2 P3"
+    }
+    "import-workflows" {
+        Ensure-EnvFile
+        Invoke-Compose -ComposeArgs @("up", "-d")
+        Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "n8n", "import:workflow", "--input=$WorkflowPath")
+        Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "n8n", "import:workflow", "--input=$AlertWorkflowPath")
+        Write-Host "Workflows importados: vulnerabilidades y alertas P1/P2/P3 hacia Jira."
+    }
     "run-triage" {
         Ensure-EnvFile
         Invoke-Compose -ComposeArgs @("up", "-d")
         Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "node", $TriageScript)
         Write-Host "Evidencia generada en integrations\n8n\output."
+    }
+    "run-alert-tickets" {
+        Ensure-EnvFile
+        Invoke-Compose -ComposeArgs @("up", "-d")
+        Invoke-Compose -ComposeArgs @("exec", "-T", "n8n", "node", $AlertScript)
+        Write-Host "Evidencia de alertas/Jira generada en integrations\n8n\output."
     }
 }

@@ -1,0 +1,229 @@
+#!/bin/bash
+
+set -euo pipefail
+
+LOG_FILE="/var/log/startup.log"
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+exec >>"$LOG_FILE" 2>&1
+
+handle_error() {
+    echo "Error on line $1"
+    exit 1
+}
+trap 'handle_error $LINENO' ERR
+
+WAZUH_MANAGER_IP="${wazuh_manager_ip}"
+WAZUH_AGENT_NAME="${wazuh_agent_name}"
+WAZUH_VERSION="${wazuh_version}"
+KALI_CONTAINER_IMAGE="${kali_container}"
+KALI_CONTAINER_NAME="kali-rolling"
+KALI_LOG="/var/log/kali-lab.log"
+KALI_EVIDENCE_DIR="/opt/kali-lab/evidence"
+DEFAULT_SCAN_TARGET_IP="${scan_target_ip}"
+DEFAULT_HTTP_TARGET="http://${scan_target_http_ip}"
+
+echo "Starting Kali attacker endpoint setup..."
+echo "Using Wazuh manager at $WAZUH_MANAGER_IP"
+
+wait_for_manager() {
+    for attempt in $(seq 1 90); do
+        if timeout 2 bash -c "cat < /dev/null > /dev/tcp/$WAZUH_MANAGER_IP/1515" 2>/dev/null; then
+            echo "Wazuh manager authd is reachable."
+            return 0
+        fi
+
+        echo "Waiting for Wazuh manager authd on $WAZUH_MANAGER_IP:1515 (attempt $attempt/90)..."
+        sleep 10
+    done
+
+    echo "Timed out waiting for Wazuh manager authd."
+    return 1
+}
+
+echo "Installing base packages..."
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    docker.io \
+    gnupg \
+    jq \
+    nmap \
+    python3 \
+    rsyslog \
+    tmux
+
+systemctl enable docker
+systemctl restart docker
+systemctl enable rsyslog
+systemctl restart rsyslog
+
+touch "$KALI_LOG"
+chown root:adm "$KALI_LOG"
+chmod 664 "$KALI_LOG"
+mkdir -p "$KALI_EVIDENCE_DIR" /opt/kali-lab/config
+chmod -R 750 /opt/kali-lab
+
+cat >/opt/kali-lab/config/scope.txt <<EOF
+scope=internal_lab_only
+default_scan_target_ip=$DEFAULT_SCAN_TARGET_IP
+default_http_target=$DEFAULT_HTTP_TARGET
+allowed_activity=controlled_nmap_and_http_probe
+note=no_third_party_targets
+EOF
+
+echo "Preparing Kali rolling container..."
+docker rm -f "$KALI_CONTAINER_NAME" >/dev/null 2>&1 || true
+docker pull "$KALI_CONTAINER_IMAGE"
+docker run -d \
+    --name "$KALI_CONTAINER_NAME" \
+    --hostname "$WAZUH_AGENT_NAME" \
+    --network host \
+    --cap-add NET_RAW \
+    --cap-add NET_ADMIN \
+    --restart unless-stopped \
+    "$KALI_CONTAINER_IMAGE" \
+    sleep infinity
+
+cat >/etc/kali-lab.env <<EOF
+KALI_AGENT_NAME="$WAZUH_AGENT_NAME"
+KALI_CONTAINER_NAME="$KALI_CONTAINER_NAME"
+KALI_LOG="$KALI_LOG"
+KALI_EVIDENCE_DIR="$KALI_EVIDENCE_DIR"
+DEFAULT_SCAN_TARGET_IP="$DEFAULT_SCAN_TARGET_IP"
+DEFAULT_HTTP_TARGET="$DEFAULT_HTTP_TARGET"
+EOF
+chmod 640 /etc/kali-lab.env
+
+echo "Installing minimal tools inside Kali container..."
+for attempt in $(seq 1 3); do
+    if docker exec "$KALI_CONTAINER_NAME" bash -lc "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nmap curl nikto dnsutils netcat-traditional iproute2"; then
+        break
+    fi
+    echo "Kali package install attempt $attempt failed; retrying..."
+    sleep 15
+done
+
+cat >/usr/local/bin/kali-lab-shell <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+. /etc/kali-lab.env
+
+detail="interactive_shell_started"
+if [ "$#" -gt 0 ]; then
+    detail="$(printf '%s ' "$@" | cut -c1-400)"
+fi
+
+echo "$(date '+%b %e %H:%M:%S') $KALI_AGENT_NAME kali-lab: action=shell_start detail=$detail" >> "$KALI_LOG"
+logger -t kali-lab "action=shell_start detail=$detail"
+
+exec docker exec -it "$KALI_CONTAINER_NAME" bash
+EOF
+chmod 755 /usr/local/bin/kali-lab-shell
+
+cat >/usr/local/bin/kali-demo-generate-events.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+. /etc/kali-lab.env
+
+TARGET_IP="$${1:-$DEFAULT_SCAN_TARGET_IP}"
+TARGET_HTTP="$${2:-$DEFAULT_HTTP_TARGET}"
+RUN_ID="$(date +%Y%m%d%H%M%S)"
+NMAP_EVIDENCE="$KALI_EVIDENCE_DIR/nmap-$RUN_ID.txt"
+HTTP_EVIDENCE="$KALI_EVIDENCE_DIR/http-$RUN_ID.txt"
+
+mkdir -p "$KALI_EVIDENCE_DIR"
+
+emit() {
+    local action="$1"
+    local detail="$2"
+    echo "$(date '+%b %e %H:%M:%S') $KALI_AGENT_NAME kali-lab: action=$action detail=$detail" >> "$KALI_LOG"
+    logger -t kali-lab "action=$action detail=$detail"
+}
+
+emit "nmap_scan" "tool=nmap target=$TARGET_IP ports=1-1024 mode=controlled_lab"
+if docker exec "$KALI_CONTAINER_NAME" bash -lc "command -v nmap >/dev/null 2>&1"; then
+    docker exec "$KALI_CONTAINER_NAME" bash -lc "nmap -Pn -sS -T4 -p1-1024 '$TARGET_IP'" > "$NMAP_EVIDENCE" 2>&1 || true
+else
+    nmap -Pn -sS -T4 -p1-1024 "$TARGET_IP" > "$NMAP_EVIDENCE" 2>&1 || true
+fi
+
+emit "http_probe" "tool=curl target=$TARGET_HTTP mode=controlled_lab"
+if docker exec "$KALI_CONTAINER_NAME" bash -lc "command -v curl >/dev/null 2>&1"; then
+    docker exec "$KALI_CONTAINER_NAME" bash -lc "curl -k -sS -I --max-time 10 '$TARGET_HTTP'" > "$HTTP_EVIDENCE" 2>&1 || true
+else
+    curl -k -sS -I --max-time 10 "$TARGET_HTTP" > "$HTTP_EVIDENCE" 2>&1 || true
+fi
+
+emit "evidence_write" "nmap=$NMAP_EVIDENCE http=$HTTP_EVIDENCE"
+echo "last_kali_demo_run=$(date -Is)" >> /opt/kali-lab/config/scope.txt
+echo "Controlled Kali lab telemetry generated."
+EOF
+chmod 755 /usr/local/bin/kali-demo-generate-events.sh
+
+wait_for_manager
+
+echo "Installing Wazuh agent..."
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH \
+    | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+chmod 644 /usr/share/keyrings/wazuh.gpg
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" \
+    >/etc/apt/sources.list.d/wazuh.list
+
+apt-get update
+if ! WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+     WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+     WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+     DEBIAN_FRONTEND=noninteractive apt-get install -y "wazuh-agent=$WAZUH_VERSION"; then
+    echo "Pinned Wazuh agent $WAZUH_VERSION was unavailable. Installing latest 4.x agent."
+    WAZUH_MANAGER="$WAZUH_MANAGER_IP" \
+    WAZUH_REGISTRATION_SERVER="$WAZUH_MANAGER_IP" \
+    WAZUH_AGENT_NAME="$WAZUH_AGENT_NAME" \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y wazuh-agent
+fi
+
+apt-mark hold wazuh-agent
+
+if ! grep -q "kali-lab" /var/ossec/etc/ossec.conf; then
+    cat >>/var/ossec/etc/ossec.conf <<'EOF'
+<ossec_config>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/kali-lab.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/syslog</location>
+  </localfile>
+
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>300</frequency>
+    <scan_on_start>yes</scan_on_start>
+    <alert_new_files>yes</alert_new_files>
+    <directories realtime="yes" report_changes="yes" check_all="yes">/opt/kali-lab</directories>
+    <directories realtime="yes" report_changes="yes" check_all="yes">/etc/kali-lab.env</directories>
+  </syscheck>
+</ossec_config>
+EOF
+fi
+
+echo "Starting Wazuh agent..."
+systemctl enable wazuh-agent
+systemctl restart wazuh-agent
+
+echo "$(date '+%b %e %H:%M:%S') $WAZUH_AGENT_NAME kali-lab: action=container_ready detail=image=$KALI_CONTAINER_IMAGE target=$DEFAULT_SCAN_TARGET_IP" >> "$KALI_LOG"
+logger -t kali-lab "action=container_ready detail=image=$KALI_CONTAINER_IMAGE target=$DEFAULT_SCAN_TARGET_IP"
+/usr/local/bin/kali-demo-generate-events.sh || true
+
+echo "Kali attacker endpoint setup completed successfully."

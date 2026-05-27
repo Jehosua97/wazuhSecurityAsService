@@ -193,6 +193,49 @@
     <group>metasploit_endpoint,red_team_lab,evidence,soc_signal,critical_asset,iso_27001_A.12.4.2,lfpdppp,</group>
   </rule>
 
+  <rule id="100210" level="6">
+    <program_name>kali-lab</program_name>
+    <description>PYME Mexico: monitored Kali attacker endpoint generated lab telemetry.</description>
+    <group>kali_endpoint,red_team_lab,offensive_workstation,soc_signal,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100211" level="6">
+    <if_sid>100210</if_sid>
+    <match>action=container_ready</match>
+    <description>PYME Mexico: Kali rolling container is ready on the monitored attacker endpoint.</description>
+    <group>kali_endpoint,red_team_lab,container_runtime,soc_signal,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100212" level="10">
+    <if_sid>100210</if_sid>
+    <match>action=nmap_scan</match>
+    <description>PYME Mexico: controlled Nmap scan launched from the monitored Kali endpoint.</description>
+    <mitre>
+      <id>T1595</id>
+    </mitre>
+    <group>kali_endpoint,red_team_lab,reconnaissance,active_scanning,port_scan,kali_attack_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100213" level="8">
+    <if_sid>100210</if_sid>
+    <match>action=http_probe</match>
+    <description>PYME Mexico: controlled HTTP probe launched from the monitored Kali endpoint.</description>
+    <group>kali_endpoint,red_team_lab,reconnaissance,http_probe,kali_attack_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.4.1,lfpdppp,</group>
+  </rule>
+
+  <rule id="100214" level="7">
+    <if_sid>100210</if_sid>
+    <match>action=evidence_write</match>
+    <description>PYME Mexico: Kali endpoint wrote controlled scan evidence.</description>
+    <group>kali_endpoint,red_team_lab,evidence,soc_signal,critical_asset,iso_27001_A.12.4.2,lfpdppp,</group>
+  </rule>
+
+  <rule id="100215" level="12" frequency="2" timeframe="300" ignore="300">
+    <if_matched_group>kali_attack_signal</if_matched_group>
+    <description>PYME Mexico SOC: repeated controlled Kali reconnaissance activity detected.</description>
+    <group>soc_incident,incident_priority_p2,kali_endpoint,red_team_lab,reconnaissance,active_scanning,critical_asset,iso_27001_A.16.1.4,lfpdppp,</group>
+  </rule>
+
   <rule id="100170" level="6">
     <program_name>gateway-lab</program_name>
     <description>PYME Mexico: edge gateway lab telemetry detected on monitored network perimeter endpoint.</description>
@@ -250,28 +293,28 @@
   <rule id="100190" level="6">
     <program_name>docker-lab</program_name>
     <description>PYME Mexico: monitored container host generated lab telemetry.</description>
-    <group>docker_host,container_platform,soc_signal,critical_asset,internet_facing,iso_27001_A.12.4.1,lfpdppp,</group>
+    <group>docker,docker_host,container_platform,soc_signal,critical_asset,internet_facing,iso_27001_A.12.4.1,lfpdppp,</group>
   </rule>
 
   <rule id="100191" level="8">
     <if_sid>100190</if_sid>
     <match>action=container_restart</match>
     <description>PYME Mexico: container restart activity detected on the monitored docker host.</description>
-    <group>docker_host,container_platform,container_runtime,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.1.2,lfpdppp,</group>
+    <group>docker,docker_host,container_platform,container_runtime,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.1.2,lfpdppp,</group>
   </rule>
 
   <rule id="100192" level="8">
     <if_sid>100190</if_sid>
     <match>action=image_pull</match>
     <description>PYME Mexico: container image pull detected on the monitored docker host.</description>
-    <group>docker_host,container_platform,image_supply_chain,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.6.1,lfpdppp,</group>
+    <group>docker,docker_host,container_platform,image_supply_chain,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,iso_27001_A.12.6.1,lfpdppp,</group>
   </rule>
 
   <rule id="100193" level="9">
     <if_sid>100190</if_sid>
     <match>action=config_drift</match>
     <description>PYME Mexico: configuration drift detected on the monitored container workload.</description>
-    <group>docker_host,container_platform,configuration_change,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,iso_27001_A.12.1.2,lfpdppp,</group>
+    <group>docker,docker_host,container_platform,configuration_change,infrastructure_signal,soc_signal,soc_correlation_seed,critical_asset,compliance_scope,iso_27001_A.12.1.2,lfpdppp,</group>
   </rule>
 
   <rule id="100200" level="6">
@@ -427,7 +470,7 @@
     <if_sid>100300</if_sid>
     <match>module=container_security</match>
     <description>Wazuh module demo: container security monitoring expected on docker-host.</description>
-    <group>wazuh_module_visibility,wazuh_agent_container_security,docker_host,container_platform,container_security,soc_signal,executive_reporting,iso_27001_A.8.9,</group>
+    <group>wazuh_module_visibility,wazuh_agent_container_security,docker,docker_host,container_platform,container_security,soc_signal,executive_reporting,iso_27001_A.8.9,</group>
   </rule>
 
   <rule id="100312" level="6">

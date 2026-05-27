@@ -67,9 +67,51 @@ variable "metasploit_machine_type" {
   default     = "e2-standard-2"
 }
 
+variable "metasploit_assign_public_ip" {
+  description = "Assign a public IP to the Metasploit endpoint. Set false when the Kali endpoint uses the available public IP quota."
+  type        = bool
+  default     = true
+}
+
 variable "metasploit_workspace_name" {
   description = "Default workspace name prepared on the Metasploit endpoint"
   default     = "customer_pyme_demo"
+}
+
+variable "enable_kali_endpoint" {
+  description = "Create a monitored Kali attacker endpoint in GCP for controlled lab validation."
+  type        = bool
+  default     = true
+}
+
+variable "kali_instance_name" {
+  description = "Name of the monitored Kali attacker endpoint"
+  default     = "kali-attacker"
+}
+
+variable "kali_machine_type" {
+  description = "Machine type for the monitored Kali attacker endpoint"
+  default     = "e2-standard-2"
+}
+
+variable "kali_boot_disk_size" {
+  description = "Boot disk size in GB for the Kali attacker endpoint"
+  default     = 40
+}
+
+variable "kali_container_image" {
+  description = "Kali container image used on the monitored attacker endpoint"
+  default     = "kalilinux/kali-rolling"
+}
+
+variable "kali_default_scan_target_ip" {
+  description = "Default internal lab IP scanned by the Kali endpoint demo script"
+  default     = "10.0.1.25"
+}
+
+variable "kali_default_http_target_ip" {
+  description = "Default internal lab HTTP target IP probed by the Kali endpoint demo script"
+  default     = "10.0.1.22"
 }
 
 variable "edge_gateway_instance_name" {

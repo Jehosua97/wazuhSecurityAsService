@@ -1,15 +1,24 @@
-# n8n Vulnerability Automation
+# n8n Security Automation
 
-Automatizacion MVP para convertir la informacion de vulnerabilidades de Wazuh en prioridades accionables para el SOC y, cuando este listo, en tickets de Jira.
+Automatizacion MVP para convertir informacion de Wazuh en prioridades accionables para el SOC y, cuando este listo, en tickets de Jira. Incluye triage de vulnerabilidades y creacion automatica de tickets para alertas `P1`, `P2` y `P3`.
 
 ## Objetivo
 
-Este modulo hace cuatro cosas:
+Este modulo hace dos flujos principales.
+
+Vulnerabilidades:
 
 1. Consulta vulnerabilidades activas desde Wazuh Indexer (`wazuh-states-vulnerabilities*`).
 2. Enriquece CVEs con CISA KEV y FIRST EPSS.
 3. Calcula prioridad de negocio (`P1` a `P4`) usando severidad, CVSS, KEV, EPSS, criticidad y exposicion del activo.
 4. Genera evidencia JSON/Markdown y, si se activa, crea tickets en Jira Cloud.
+
+Alertas:
+
+1. Consulta alertas desde `wazuh-alerts-*`.
+2. Selecciona reglas marcadas con `incident_priority_p1`, `incident_priority_p2` o `incident_priority_p3`.
+3. Agrupa duplicados por regla, agente, IP, usuario y path.
+4. Crea tickets Jira con una descripcion detallada de que paso y por que se disparo.
 
 La fase de IA queda preparada para agregarse despues entre el triage y la creacion del ticket.
 
@@ -18,18 +27,21 @@ La fase de IA queda preparada para agregarse despues entre el triage y la creaci
 ```text
 Wazuh Indexer
   index: wazuh-states-vulnerabilities*
+  index: wazuh-alerts-*
         |
         v
 n8n workflow
-  Manual Trigger / Daily Schedule
+  Manual Trigger / Schedule
         |
         v
-Node script versionado
+Node scripts versionados
   integrations/n8n/scripts/wazuh-vulnerability-triage.js
+  integrations/n8n/scripts/wazuh-alert-jira-tickets.js
         |
         +--> CISA KEV
         +--> FIRST EPSS
         +--> Risk scoring
+        +--> Alert grouping P1/P2/P3
         +--> Markdown/JSON evidence
         +--> Jira Cloud ticket creation (opcional)
 ```
@@ -41,8 +53,11 @@ Node script versionado
 | `docker-compose.n8n.yml` | Levanta n8n local con Docker, solo como fallback. |
 | `integrations/n8n/.env.example` | Variables necesarias para Wazuh, KEV, EPSS y Jira. |
 | `integrations/n8n/workflows/wazuh-vulnerability-triage.workflow.json` | Workflow importable en n8n. |
+| `integrations/n8n/workflows/wazuh-alert-jira-tickets.workflow.json` | Workflow importable para tickets Jira de alertas P1/P2/P3. |
 | `integrations/n8n/scripts/wazuh-vulnerability-triage.js` | Logica de consulta, enriquecimiento, scoring y Jira. |
+| `integrations/n8n/scripts/wazuh-alert-jira-tickets.js` | Logica de consulta de alertas, deduplicacion y Jira. |
 | `integrations/n8n/samples/wazuh-vulnerabilities-sample.json` | Datos ficticios para validar el workflow sin conectar a Wazuh. |
+| `integrations/n8n/samples/wazuh-alerts-sample.json` | Datos ficticios para validar tickets de alertas sin conectar a Wazuh. |
 | `integrations/n8n/output/` | Evidencia generada por cada ejecucion. No se commitea. |
 | `scripts/n8n-security-automation.ps1` | Helper para levantar n8n, importar workflow y correr triage. |
 | `scripts/start-wazuh-indexer-tunnel.ps1` | Tunel SSH local hacia el Wazuh Indexer en GCP. |
@@ -106,6 +121,14 @@ terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_triage_command
 
 Ejecuta el comando devuelto para correr `wazuh-vulnerability-triage.js` dentro del contenedor cloud.
 
+Ejecutar creacion de tickets por alertas desde la nube:
+
+```powershell
+terraform -chdir=terraform/wazuh-deploy output -raw n8n_run_alert_tickets_command
+```
+
+Ejecuta el comando devuelto para correr `wazuh-alert-jira-tickets.js` dentro del contenedor cloud.
+
 ## Puesta en marcha local fallback
 
 ### 1. Crear archivo de variables
@@ -160,10 +183,17 @@ http://localhost:5678
 .\scripts\n8n-security-automation.ps1 -Action import-workflow
 ```
 
-En n8n, abrir:
+Para importar ambos workflows:
+
+```powershell
+.\scripts\n8n-security-automation.ps1 -Action import-workflows
+```
+
+En n8n, abrir alguno de estos workflows:
 
 ```text
 Wazuh Vulnerability Triage - KEV EPSS Jira
+Wazuh Alert Jira Tickets - P1 P2 P3
 ```
 
 ### 5. Ejecutar triage sin Jira
@@ -174,6 +204,12 @@ Desde PowerShell:
 .\scripts\n8n-security-automation.ps1 -Action run-triage
 ```
 
+Para ejecutar el flujo de alertas P1/P2/P3:
+
+```powershell
+.\scripts\n8n-security-automation.ps1 -Action run-alert-tickets
+```
+
 O desde n8n, usar `Manual Trigger`.
 
 La evidencia queda en:
@@ -181,6 +217,8 @@ La evidencia queda en:
 ```text
 integrations/n8n/output/vulnerability-triage-latest.json
 integrations/n8n/output/vulnerability-triage-latest.md
+integrations/n8n/output/alert-jira-triage-latest.json
+integrations/n8n/output/alert-jira-triage-latest.md
 ```
 
 ## Activar Jira
@@ -189,16 +227,19 @@ Primero probar con `JIRA_CREATE_TICKETS=false`. Cuando el output sea correcto, e
 
 ```env
 JIRA_CREATE_TICKETS=true
+JIRA_CREATE_ALERT_TICKETS=true
 JIRA_BASE_URL=https://your-domain.atlassian.net
 JIRA_EMAIL=security@example.com
 JIRA_API_TOKEN=CAMBIAR_EN_PASSWORD_MANAGER
 JIRA_PROJECT_KEY=SEC
 JIRA_ISSUE_TYPE=Task
 JIRA_MAX_TICKETS=15
+JIRA_ALERT_MAX_TICKETS=15
 JIRA_DEDUPE=true
+JIRA_ALERT_DEDUPE=true
 ```
 
-El script crea tickets para todos los hallazgos priorizados, sin filtrar por `P1`/`P2`/`P3`/`P4`, limitado por `JIRA_MAX_TICKETS`. Cada ticket creado o detectado por deduplicacion devuelve `issueUrl` y el workflow lo resume en el nodo `Jira Ticket Links`.
+El script de vulnerabilidades crea tickets para todos los hallazgos priorizados, limitado por `JIRA_MAX_TICKETS`. El script de alertas crea tickets para `P1`, `P2` y `P3`, limitado por `JIRA_ALERT_MAX_TICKETS`. Cada ticket creado o detectado por deduplicacion devuelve `issueUrl` y el workflow lo resume en el nodo `Jira Ticket Links`.
 
 ## Modo sample sin Wazuh
 
@@ -206,17 +247,20 @@ Para validar n8n, scoring y evidencia sin abrir el tunel a Wazuh, configura:
 
 ```env
 TRIAGE_SAMPLE_FILE=/home/node/.n8n/samples/wazuh-vulnerabilities-sample.json
+ALERT_SAMPLE_FILE=/home/node/.n8n/samples/wazuh-alerts-sample.json
 ENRICHMENT_OFFLINE=true
 JIRA_CREATE_TICKETS=false
+JIRA_CREATE_ALERT_TICKETS=false
 ```
 
 Despues ejecuta:
 
 ```powershell
 .\scripts\n8n-security-automation.ps1 -Action run-triage
+.\scripts\n8n-security-automation.ps1 -Action run-alert-tickets
 ```
 
-Cuando quieras volver a datos reales, deja `TRIAGE_SAMPLE_FILE=` vacio.
+Cuando quieras volver a datos reales, deja `TRIAGE_SAMPLE_FILE=` y `ALERT_SAMPLE_FILE=` vacios.
 
 ## Scoring
 

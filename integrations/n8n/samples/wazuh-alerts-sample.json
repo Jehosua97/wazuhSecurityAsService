@@ -1,0 +1,114 @@
+{
+  "hits": {
+    "hits": [
+      {
+        "_source": {
+          "timestamp": "2026-05-27T16:43:14.372+0000",
+          "rule": {
+            "level": 14,
+            "description": "PYME Mexico SOC: web attack activity was followed by suspicious evidence or sensitive-path changes on the same asset.",
+            "id": "100152",
+            "groups": [
+              "soc_incident",
+              "incident_priority_p1",
+              "web",
+              "attack",
+              "syscheck",
+              "critical_asset",
+              "internet_facing"
+            ],
+            "mitre": {
+              "id": ["T1190", "T1565"]
+            }
+          },
+          "agent": {
+            "id": "019",
+            "name": "pyme-demo-target",
+            "ip": "10.0.1.22"
+          },
+          "manager": {
+            "name": "wazuh.manager"
+          },
+          "data": {
+            "srcip": "45.142.193.12",
+            "dstip": "10.0.1.22"
+          },
+          "syscheck": {
+            "path": "/opt/pyme-compliance/evidence.txt"
+          },
+          "full_log": "Controlled web attack was followed by a compliance evidence file modification.",
+          "location": "/var/ossec/logs/alerts/alerts.json"
+        }
+      },
+      {
+        "_source": {
+          "timestamp": "2026-05-27T16:43:16.000+0000",
+          "rule": {
+            "level": 12,
+            "description": "Port scan behavior detected from the same source IP against Linux UI endpoint.",
+            "id": "100030",
+            "groups": [
+              "soc_incident",
+              "incident_priority_p2",
+              "reconnaissance",
+              "active_scanning",
+              "port_scan",
+              "critical_asset"
+            ],
+            "mitre": {
+              "id": ["T1595"]
+            }
+          },
+          "agent": {
+            "id": "021",
+            "name": "linux-ui-workstation",
+            "ip": "10.0.1.25"
+          },
+          "manager": {
+            "name": "wazuh.manager"
+          },
+          "data": {
+            "srcip": "64.62.197.225",
+            "dstip": "10.0.1.25",
+            "dstport": "22"
+          },
+          "full_log": "Multiple firewall drops from the same source IP reached the Linux UI endpoint.",
+          "location": "/var/log/kern.log"
+        }
+      },
+      {
+        "_source": {
+          "timestamp": "2026-05-27T16:43:20.000+0000",
+          "rule": {
+            "level": 10,
+            "description": "Wazuh module demo: safe Active Response trigger requested; evidence-only action expected.",
+            "id": "100309",
+            "groups": [
+              "wazuh_module_visibility",
+              "wazuh_agent_active_response",
+              "active_response",
+              "incident_priority_p3",
+              "soc_signal"
+            ],
+            "mitre": {
+              "id": ["T1562"]
+            }
+          },
+          "agent": {
+            "id": "017",
+            "name": "docker-host",
+            "ip": "10.0.1.24"
+          },
+          "manager": {
+            "name": "wazuh.manager"
+          },
+          "data": {
+            "srcuser": "root"
+          },
+          "full_log": "module=active_response action=trigger_safe_response profile=docker-host",
+          "location": "/var/log/wazuh-agent-modules-demo.log"
+        }
+      }
+    ]
+  }
+}

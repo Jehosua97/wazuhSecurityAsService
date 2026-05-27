@@ -7,8 +7,11 @@ Este documento acompana el import de dos dashboards para tu instancia actual de 
 - `SOC Ejecutivo - PYME Mexico`
 - `SOC Operativo - PYME Mexico`
 - `SOC Modulos Wazuh - Demo tecnico`
+- `SOC Docker y Cloud Security - Visual`
+- `SOC Geo - Amenazas y respuesta` en la seccion Maps
 
 Los dashboards se crean como saved objects de OpenSearch Dashboards y se importan sobre el data view `wazuh-alerts-*`.
+El mapa SOC usa un indice dedicado `soc-lab-geo-events` con campo `location` tipo `geo_point`.
 
 ## Como importarlos
 
@@ -38,6 +41,8 @@ Y agrega:
 - Ejecutivo: `/app/dashboards#/view/soc-ejecutivo-dashboard`
 - Operativo: `/app/dashboards#/view/soc-operativo-dashboard`
 - Modulos Wazuh: `/app/dashboards#/view/soc-modulos-wazuh-dashboard`
+- Docker y Cloud Security: `/app/dashboards#/view/soc-docker-cloud-security-dashboard`
+- Mapa SOC: `/app/maps-dashboards#/view/soc-geo-threat-map`
 
 ## Dashboard Ejecutivo
 
@@ -76,6 +81,38 @@ Paneles:
 - Inventario, vulnerabilidades y malware detection
 - Active Response seguro
 - Contenedores y Cloud
+
+## Dashboard Docker y Cloud Security
+
+Pensado para mostrar visualmente el modulo de Docker dentro de Cloud Security.
+
+Paneles:
+
+- Vista general Docker + Cloud
+- Runtime Docker en `docker-host`
+- Drift de configuracion de contenedores
+- Eventos GCP Cloud Security simulados
+
+## Mapa SOC
+
+Pensado para explicar visualmente de donde vienen los eventos y que respuesta
+ejecuta el SOC.
+
+Capas:
+
+- fuerza bruta con bloqueo global de 2 minutos
+- IP maliciosa por reputacion
+- escaneo y reconocimiento
+- Kali controlado
+- activos protegidos y automatizacion
+- Docker / Container Security
+- GCP / Cloud Security
+
+Para importarlo o refrescar sus datos:
+
+```powershell
+.\scripts\import-wazuh-soc-map.ps1
+```
 
 ## Queries base
 
