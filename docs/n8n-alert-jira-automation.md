@@ -32,6 +32,9 @@ ChatGPT SOC Analysis
 Create Jira Tickets
         |
         v
+Telegram P1/P2 Alert
+        |
+        v
 Jira Ticket Links
 ```
 
@@ -66,11 +69,25 @@ AI_MAX_CHARS=8000
 AI_MAX_ANALYSES=15
 AI_TIMEOUT_MS=60000
 OPENAI_API_KEY=
+
+TELEGRAM_ENABLE_ALERTS=false
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+TELEGRAM_ALERT_PRIORITIES=P1,P2
+TELEGRAM_MAX_ALERTS=10
+TELEGRAM_DEDUPE=true
+TELEGRAM_DEDUPE_TTL_HOURS=24
+TELEGRAM_DISABLE_WEB_PAGE_PREVIEW=true
+TELEGRAM_EVIDENCE_MAX_CHARS=900
+TELEGRAM_MAX_MESSAGE_CHARS=3900
+TELEGRAM_TIMEOUT_MS=30000
 ```
 
 `JIRA_CREATE_ALERT_TICKETS=false` deja el flujo en modo dry-run: no crea tickets, pero genera evidencia y muestra que tickets habria creado.
 
 `AI_ENABLE_ANALYSIS=false` deja apagado el modulo de IA. Cuando se configura en `true`, el script envia a OpenAI la evidencia de Wazuh ya normalizada y agrega la respuesta en Jira bajo la seccion `Analisis IA (ChatGPT)`.
+
+`TELEGRAM_ENABLE_ALERTS=false` deja apagadas las notificaciones Telegram. Cuando se configura en `true`, el nodo `Telegram P1/P2 Alert` envia mensajes para las prioridades definidas en `TELEGRAM_ALERT_PRIORITIES`, por defecto `P1,P2`.
 
 ## Como probar sin Jira real
 
@@ -154,7 +171,46 @@ El script soporta estos modos para que n8n pueda mostrar cada etapa:
 ALERT_AUTOMATION_MODE=collect  # recolecta y agrupa alertas Wazuh
 ALERT_AUTOMATION_MODE=ai       # ejecuta ChatGPT SOC Analysis
 ALERT_AUTOMATION_MODE=jira     # crea o reutiliza tickets Jira
+ALERT_AUTOMATION_MODE=telegram # envia notificaciones Telegram P1/P2
 ALERT_AUTOMATION_MODE=all      # modo CLI completo, usado por defecto
+```
+
+## Alertas Telegram P1/P2
+
+El workflow incluye un nodo visible llamado `Telegram P1/P2 Alert`. Se ejecuta despues de Jira para poder incluir el link del ticket si existe.
+
+Para activarlo:
+
+1. En Telegram, habla con `@BotFather` y crea un bot.
+2. Copia el token del bot.
+3. Envia un mensaje cualquiera al bot desde el chat que quieres usar.
+4. Consulta `https://api.telegram.org/bot<TU_TOKEN>/getUpdates` y copia el `chat.id`.
+5. Edita el `.env` de la VM:
+
+```powershell
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo nano /opt/wazuh-n8n/.env"
+```
+
+Configura:
+
+```env
+TELEGRAM_ENABLE_ALERTS=true
+TELEGRAM_BOT_TOKEN=tu_token_de_bot
+TELEGRAM_CHAT_ID=tu_chat_id
+TELEGRAM_ALERT_PRIORITIES=P1,P2
+```
+
+Reinicia:
+
+```powershell
+gcloud compute ssh n8n-automation --project=wazuh-iac-on-gcp --zone=us-central1-a --command="sudo systemctl restart wazuh-n8n"
+```
+
+La deduplicacion evita reenviar el mismo incidente durante 24 horas:
+
+```env
+TELEGRAM_DEDUPE=true
+TELEGRAM_DEDUPE_TTL_HOURS=24
 ```
 
 Prompt base:

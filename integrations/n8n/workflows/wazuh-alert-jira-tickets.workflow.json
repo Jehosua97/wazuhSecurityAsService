@@ -117,6 +117,33 @@
     },
     {
       "parameters": {
+        "command": "sh -lc 'ALERT_AUTOMATION_MODE=telegram node /home/node/.n8n/scripts/wazuh-alert-jira-tickets.js'"
+      },
+      "id": "telegram-p1-p2-alert",
+      "name": "Telegram P1/P2 Alert",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        -20
+      ],
+      "notes": "Sends Telegram notifications for P1/P2 alerts when TELEGRAM_ENABLE_ALERTS=true. Uses TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from .env."
+    },
+    {
+      "parameters": {
+        "jsCode": "const stdout = $json.stdout || '';\nconst start = stdout.indexOf('{');\nif (start < 0) {\n  return [{ json: { status: 'error', stage: 'telegram', message: 'No JSON found in script stdout', raw: stdout, stderr: $json.stderr || '' } }];\n}\nconst parsed = JSON.parse(stdout.slice(start));\nreturn [{ json: { status: 'ok', stage: 'telegram', ...parsed, stderr: $json.stderr || '' } }];"
+      },
+      "id": "parse-telegram-summary",
+      "name": "Parse Telegram Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        -20
+      ]
+    },
+    {
+      "parameters": {
         "jsCode": "const results = $json.jiraResults || [];\nconst ticketLinks = results\n  .filter((item) => item.issueUrl)\n  .map((item) => ({\n    key: item.key || '',\n    url: item.issueUrl,\n    action: item.action,\n    priority: item.priority,\n    ruleId: item.ruleId,\n    agentName: item.agentName,\n    aiAnalysis: item.aiAnalysis || 'disabled',\n  }));\n\nreturn [{\n  json: {\n    ...$json,\n    ticketLinks,\n    ticketLinkSummary: ticketLinks.length\n      ? ticketLinks.map((item) => `${item.priority} ${item.ruleId} ${item.key}: ${item.url} (AI: ${item.aiAnalysis})`).join('\\n')\n      : 'No Jira ticket links returned. Check JIRA_CREATE_ALERT_TICKETS, Jira credentials, and dedupe settings.',\n  },\n}];"
       },
       "id": "jira-ticket-links",
@@ -124,14 +151,14 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1100,
+        1660,
         -20
       ],
       "notes": "Collects direct Jira URLs returned by the ticket creation stage."
     },
     {
       "parameters": {
-        "content": "## Wazuh Alert Jira Tickets\n\n1. Collect Wazuh P1/P2/P3 alerts.\n2. Parse grouped incidents.\n3. Run `ChatGPT SOC Analysis` as a visible AI stage.\n4. Create or deduplicate Jira tickets.\n5. Return direct Jira links.\n\n`ChatGPT SOC Analysis` calls OpenAI only when `AI_ENABLE_ANALYSIS=true` and `OPENAI_API_KEY` is configured. The AI response is inserted into Jira under `Analisis IA (ChatGPT)`.",
+        "content": "## Wazuh Alert Jira Tickets\n\n1. Collect Wazuh P1/P2/P3 alerts.\n2. Parse grouped incidents.\n3. Run `ChatGPT SOC Analysis` as a visible AI stage.\n4. Create or deduplicate Jira tickets.\n5. Send Telegram for P1/P2 when enabled.\n6. Return direct Jira links.\n\n`ChatGPT SOC Analysis` calls OpenAI only when `AI_ENABLE_ANALYSIS=true` and `OPENAI_API_KEY` is configured. `Telegram P1/P2 Alert` sends messages only when `TELEGRAM_ENABLE_ALERTS=true`.",
         "height": 340,
         "width": 500
       },
@@ -227,6 +254,28 @@
       "main": [
         [
           {
+            "node": "Telegram P1/P2 Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram P1/P2 Alert": {
+      "main": [
+        [
+          {
+            "node": "Parse Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Telegram Summary": {
+      "main": [
+        [
+          {
             "node": "Jira Ticket Links",
             "type": "main",
             "index": 0
@@ -249,6 +298,9 @@
     },
     {
       "name": "chatgpt"
+    },
+    {
+      "name": "telegram"
     },
     {
       "name": "alert-triage"

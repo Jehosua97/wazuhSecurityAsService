@@ -263,8 +263,24 @@ Mantener `AI_ENABLE_ANALYSIS=false` para pruebas sin costo o cuando no haya `OPE
 El workflow queda dividido visualmente asi:
 
 ```text
-Collect Wazuh Alerts -> ChatGPT SOC Analysis -> Create Jira Tickets -> Jira Ticket Links
+Collect Wazuh Alerts -> ChatGPT SOC Analysis -> Create Jira Tickets -> Telegram P1/P2 Alert -> Jira Ticket Links
 ```
+
+## Activar Telegram para P1/P2
+
+El workflow de alertas tambien tiene un nodo visible llamado `Telegram P1/P2 Alert`. Ese nodo envia mensajes solo para prioridades `P1` y `P2` cuando Telegram esta habilitado.
+
+```env
+TELEGRAM_ENABLE_ALERTS=true
+TELEGRAM_BOT_TOKEN=CAMBIAR_EN_PASSWORD_MANAGER
+TELEGRAM_CHAT_ID=CAMBIAR_EN_PASSWORD_MANAGER
+TELEGRAM_ALERT_PRIORITIES=P1,P2
+TELEGRAM_MAX_ALERTS=10
+TELEGRAM_DEDUPE=true
+TELEGRAM_DEDUPE_TTL_HOURS=24
+```
+
+Mantener `TELEGRAM_ENABLE_ALERTS=false` para pruebas sin notificaciones. La deduplicacion guarda memoria en `integrations/n8n/output/telegram-alerts-state.json` o en el volumen persistente de la VM.
 
 ## Modo sample sin Wazuh
 

@@ -8,6 +8,7 @@ const crypto = require("crypto");
 
 const OUTPUT_DIR = process.env.TRIAGE_OUTPUT_DIR || "/home/node/.n8n/output";
 const LATEST_OUTPUT_FILE = path.join(OUTPUT_DIR, "alert-jira-triage-latest.json");
+const TELEGRAM_STATE_FILE = path.join(OUTPUT_DIR, "telegram-alerts-state.json");
 
 function env(name, fallback = "") {
   const value = process.env[name];
@@ -108,7 +109,8 @@ function requestJson(url, options = {}) {
           }
         }
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          const error = new Error(`HTTP ${res.statusCode} from ${target.origin}${target.pathname}`);
+          const errorUrl = options.errorUrl || `${target.origin}${target.pathname}`;
+          const error = new Error(`HTTP ${res.statusCode} from ${errorUrl}`);
           error.statusCode = res.statusCode;
           error.body = bodyValue;
           reject(error);
@@ -668,6 +670,158 @@ async function createJiraAlertTickets(alerts) {
   return results;
 }
 
+function telegramEnabled() {
+  return envBool("TELEGRAM_ENABLE_ALERTS", false);
+}
+
+function telegramPriorities() {
+  return new Set(parseList(env("TELEGRAM_ALERT_PRIORITIES", "P1,P2"), ["P1", "P2"]).map((item) => item.toUpperCase()));
+}
+
+function telegramJiraByHash(jiraResults) {
+  const byHash = new Map();
+  for (const result of jiraResults || []) {
+    if (result.keyHash) byHash.set(result.keyHash, result);
+  }
+  return byHash;
+}
+
+function loadTelegramState() {
+  if (!envBool("TELEGRAM_DEDUPE", true)) return {};
+  if (!fs.existsSync(TELEGRAM_STATE_FILE)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(TELEGRAM_STATE_FILE, "utf8"));
+  } catch (error) {
+    console.error(`WARN: Could not read Telegram state file: ${error.message}`);
+    return {};
+  }
+}
+
+function writeTelegramState(state) {
+  if (!envBool("TELEGRAM_DEDUPE", true)) return;
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(TELEGRAM_STATE_FILE, JSON.stringify(state, null, 2));
+}
+
+function telegramAlreadySent(state, alert) {
+  if (!envBool("TELEGRAM_DEDUPE", true)) return false;
+  const previous = state[alert.keyHash];
+  if (!previous || !previous.sentAt) return false;
+  const ttlMs = envNumber("TELEGRAM_DEDUPE_TTL_HOURS", 24) * 60 * 60 * 1000;
+  return Date.now() - Date.parse(previous.sentAt) < ttlMs;
+}
+
+function telegramText(alert, jiraResult) {
+  const lines = [
+    `[Wazuh ${alert.priority}] ${alert.ruleDescription || "SOC alert"}`,
+    "",
+    `Cliente: ${alert.clientName}`,
+    `Regla: ${alert.ruleId} / Nivel ${alert.ruleLevel}`,
+    `Agente: ${alert.agentName} (${alert.agentId || "sin id"})`,
+    `IP agente: ${alert.agentIp || "N/A"}`,
+    `Primera vez: ${alert.firstSeen || alert.timestamp || "N/A"}`,
+    `Ultima vez: ${alert.lastSeen || alert.timestamp || "N/A"}`,
+    "",
+    "Indicadores:",
+    `- IP origen: ${alert.srcip || "N/A"}`,
+    `- IP destino: ${alert.dstip || "N/A"}`,
+    `- Puerto destino: ${alert.dstport || "N/A"}`,
+    `- Usuario: ${alert.srcuser || alert.dstuser || "N/A"}`,
+    `- Ruta FIM: ${alert.syscheckPath || "N/A"}`,
+    "",
+    `Motivo: ${alert.triggerReason || "N/A"}`,
+    "",
+    `Jira: ${(jiraResult || {}).issueUrl || (jiraResult || {}).key || "Sin ticket/link disponible"}`,
+    `IA: ${(alert.aiAnalysis || {}).action || "disabled"}`,
+    "",
+    "Evidencia:",
+    compactWhitespace(alert.fullLog || "N/A", envNumber("TELEGRAM_EVIDENCE_MAX_CHARS", 900)),
+  ];
+
+  return lines.join("\n").slice(0, envNumber("TELEGRAM_MAX_MESSAGE_CHARS", 3900));
+}
+
+async function telegramRequest(message) {
+  const token = env("TELEGRAM_BOT_TOKEN", "");
+  const chatId = env("TELEGRAM_CHAT_ID", "");
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  if (!chatId) throw new Error("TELEGRAM_CHAT_ID is not configured");
+
+  return requestJson(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    errorUrl: "https://api.telegram.org/bot<redacted>/sendMessage",
+    body: {
+      chat_id: chatId,
+      text: message,
+      disable_web_page_preview: envBool("TELEGRAM_DISABLE_WEB_PAGE_PREVIEW", true),
+    },
+    timeoutMs: envNumber("TELEGRAM_TIMEOUT_MS", 30000),
+  });
+}
+
+async function sendTelegramNotifications(alerts, jiraResults) {
+  const priorities = telegramPriorities();
+  const candidates = (alerts || []).filter((alert) => priorities.has(String(alert.priority || "").toUpperCase()));
+  if (!telegramEnabled()) {
+    return candidates.map((alert) => ({
+      keyHash: alert.keyHash,
+      priority: alert.priority,
+      ruleId: alert.ruleId,
+      agentName: alert.agentName,
+      action: "disabled",
+    }));
+  }
+
+  const maxAlerts = envNumber("TELEGRAM_MAX_ALERTS", 10);
+  const state = loadTelegramState();
+  const jiraByHash = telegramJiraByHash(jiraResults);
+  const results = [];
+
+  for (const alert of candidates.slice(0, maxAlerts)) {
+    if (telegramAlreadySent(state, alert)) {
+      results.push({
+        keyHash: alert.keyHash,
+        priority: alert.priority,
+        ruleId: alert.ruleId,
+        agentName: alert.agentName,
+        action: "skipped-existing",
+      });
+      continue;
+    }
+
+    try {
+      const response = await telegramRequest(telegramText(alert, jiraByHash.get(alert.keyHash)));
+      state[alert.keyHash] = {
+        sentAt: new Date().toISOString(),
+        priority: alert.priority,
+        ruleId: alert.ruleId,
+        agentName: alert.agentName,
+      };
+      results.push({
+        keyHash: alert.keyHash,
+        priority: alert.priority,
+        ruleId: alert.ruleId,
+        agentName: alert.agentName,
+        action: "sent",
+        messageId: response.result && response.result.message_id,
+      });
+    } catch (error) {
+      results.push({
+        keyHash: alert.keyHash,
+        priority: alert.priority,
+        ruleId: alert.ruleId,
+        agentName: alert.agentName,
+        action: "error",
+        error: error.message,
+        body: error.body || "",
+      });
+    }
+  }
+
+  writeTelegramState(state);
+  return results;
+}
+
 function markdownSummary(result) {
   const lines = [
     `# Wazuh Alert Jira Automation - ${result.clientName}`,
@@ -686,6 +840,8 @@ function markdownSummary(result) {
     `- Jira creation enabled: ${result.jiraCreateTickets}`,
     `- AI analysis enabled: ${result.ai.enabled}`,
     `- AI analyses generated: ${result.ai.generated}`,
+    `- Telegram enabled: ${result.telegram.enabled}`,
+    `- Telegram sent: ${result.telegram.sent}`,
     "",
     "## Alerts",
     "",
@@ -723,12 +879,13 @@ function writeOutputs(result) {
   fs.writeFileSync(latestMd, md);
 }
 
-function buildResult({ generatedAt, rawAlertCount, alerts, jiraResults = [] }) {
+function buildResult({ generatedAt, rawAlertCount, alerts, jiraResults = [], telegramResults = [] }) {
   const countsByPriority = alerts.reduce((acc, alert) => {
     acc[alert.priority] = (acc[alert.priority] || 0) + 1;
     return acc;
   }, {});
   const aiGenerated = alerts.filter((alert) => (alert.aiAnalysis || {}).action === "generated").length;
+  const telegramSent = telegramResults.filter((result) => result.action === "sent").length;
 
   return {
     clientName: env("CLIENT_NAME", "Demo PYME"),
@@ -749,7 +906,15 @@ function buildResult({ generatedAt, rawAlertCount, alerts, jiraResults = [] }) {
       generated: aiGenerated,
     },
     jiraCreateTickets: envBool("JIRA_CREATE_ALERT_TICKETS", envBool("JIRA_CREATE_TICKETS", false)),
+    telegram: {
+      enabled: telegramEnabled(),
+      priorities: Array.from(telegramPriorities()),
+      maxAlerts: envNumber("TELEGRAM_MAX_ALERTS", 10),
+      sent: telegramSent,
+      dedupe: envBool("TELEGRAM_DEDUPE", true),
+    },
     jiraResults,
+    telegramResults,
     alerts,
   };
 }
@@ -763,6 +928,7 @@ async function collectAlertsOnly() {
     rawAlertCount,
     alerts: normalizeAlerts(wazuhResponse),
     jiraResults: [],
+    telegramResults: [],
   });
 }
 
@@ -774,6 +940,7 @@ async function applyAiOnly() {
     rawAlertCount: existing.rawAlertCount || alerts.length,
     alerts,
     jiraResults: existing.jiraResults || [],
+    telegramResults: existing.telegramResults || [],
   });
 }
 
@@ -786,6 +953,21 @@ async function createJiraOnly() {
     rawAlertCount: existing.rawAlertCount || alerts.length,
     alerts,
     jiraResults,
+    telegramResults: existing.telegramResults || [],
+  });
+}
+
+async function sendTelegramOnly() {
+  const existing = loadAutomationResultFromFile();
+  const alerts = existing.alerts || [];
+  const jiraResults = existing.jiraResults || [];
+  const telegramResults = await sendTelegramNotifications(alerts, jiraResults);
+  return buildResult({
+    generatedAt: existing.generatedAt || new Date().toISOString(),
+    rawAlertCount: existing.rawAlertCount || alerts.length,
+    alerts,
+    jiraResults,
+    telegramResults,
   });
 }
 
@@ -799,15 +981,19 @@ async function main() {
     result = await applyAiOnly();
   } else if (mode === "jira") {
     result = await createJiraOnly();
+  } else if (mode === "telegram") {
+    result = await sendTelegramOnly();
   } else if (mode === "all") {
     const collected = await collectAlertsOnly();
     const alerts = await enrichAlertsWithAi(collected.alerts || []);
     const jiraResults = await createJiraAlertTickets(alerts);
+    const telegramResults = await sendTelegramNotifications(alerts, jiraResults);
     result = buildResult({
       generatedAt: collected.generatedAt,
       rawAlertCount: collected.rawAlertCount,
       alerts,
       jiraResults,
+      telegramResults,
     });
   } else {
     throw new Error(`Unsupported ALERT_AUTOMATION_MODE: ${mode}`);
