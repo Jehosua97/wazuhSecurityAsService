@@ -1,0 +1,53 @@
+site_name: Wazuh Security as a Service
+site_description: Documentacion operativa del laboratorio Wazuh, GCP, n8n y escenarios SOC.
+docs_dir: docs
+
+theme:
+  name: material
+  language: es
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+    - search.suggest
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - fenced_code
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Inicio: index.md
+  - Empezar:
+      - Como usar esta documentacion: como-usar-la-documentacion.md
+      - Puesta en marcha: getting-started.md
+      - Accesos y credenciales: accesos-y-credenciales.md
+      - Operacion diaria: operacion-diaria.md
+      - Cambios recientes: cambios-recientes.md
+  - Runbooks:
+      - RHEL UI en GCP: runbooks/rhel-ui-gcp.md
+      - n8n SOC Automation: runbooks/n8n-soc-automation.md
+      - Docker Cloud Security: docker-cloud-security-visual.md
+      - Linux UI FIM: linux-ui-sensitive-lab.md
+      - Dashboards Wazuh: wazuh-soc-dashboards.md
+      - Geo Map SOC: wazuh-soc-geo-map.md
+      - Kali en GCP: kali-cloud-endpoint.md
+  - Escenarios:
+      - Modulos Wazuh: wazuh-agent-modules-demo.md
+      - Windows AD: windows-ad-wazuh-modules-demo.md
+      - Playbook SOC MVP: soc-mvp-playbook.md
+      - Ruido de endpoints: endpoint-noise-playbook.md
+  - n8n:
+      - Vulnerabilidades: n8n-vulnerability-automation.md
+      - Alertas Jira IA Telegram: n8n-alert-jira-automation.md
+  - Referencia:
+      - Onboarding de endpoints: endpoint-onboarding.md
+      - Queries SOC: soc-dashboard-queries.md
+      - Docker local: local-docker-endpoints.md
+      - Lab master: lab-master.md

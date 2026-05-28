@@ -4,6 +4,12 @@
 
 ### Added
 
+- Agregado sitio de documentacion con MkDocs (`mkdocs.yml`, `requirements-docs.txt` y nuevas paginas en `docs/`).
+- Agregadas paginas amigables para puesta en marcha, accesos/credenciales, operacion diaria y cambios recientes.
+- Agregados runbooks cortos para `rhel-ui-workstation` y n8n SOC Automation.
+- Agregada plantilla `.github/PULL_REQUEST_TEMPLATE.md` para obligar a documentar pruebas, cambios y secretos.
+- Agregado workflow `.github/workflows/docs.yml` para validar que la documentacion MkDocs compile.
+- Agregado `scripts/configure-rhel-ui-workstation.sh` para preparar Red Hat Enterprise Linux con GNOME + XRDP.
 - Creada carpeta `demo-mode/` con scripts seguros para generar eventos controlados en Wazuh.
 - Agregado `demo-mode/run_all_demo_events.sh` para ejecutar todos los escenarios.
 - Agregado `demo-mode/reset_demo.sh` para revertir artefactos temporales.
@@ -22,3 +28,7 @@
 - Ajustados `scripts/lab-master.ps1` y `scripts/local-docker-lab.ps1` para resolver la IP real desde GCP/Terraform antes de usar `WAZUH_MANAGER_IP` del entorno.
 - Corregido `scripts/lab-master.ps1 -Action status` para exportar la IP resuelta a `WAZUH_MANAGER_IP` antes de consultar Docker Compose.
 - Agregado self-healing de usuario/grupo `wazuh` en `docker/linux-endpoints/entrypoint.sh` para que los agentes no queden desconectados al recrear contenedores con volumenes persistentes.
+
+### Changed
+
+- El README ahora funciona como entrada principal y apunta a paginas operativas mas cortas en `docs/`.

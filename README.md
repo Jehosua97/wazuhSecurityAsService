@@ -18,6 +18,36 @@ El objetivo del proyecto es demostrar, vender y operar una oferta inicial de Man
 
 La solución está diseñada para defensa, monitoreo, educación y demostración controlada. No debe usarse para explotación real, pruebas contra terceros, evasión, persistencia, malware ni actividades sin autorización explícita.
 
+## Guia rapida del equipo
+
+Este README es la puerta de entrada. La documentacion operativa vive en `docs/` y tambien puede verse como sitio navegable con MkDocs.
+
+| Necesito | Donde verlo |
+|---|---|
+| Saber que cambio recientemente | `docs/cambios-recientes.md` y `CHANGELOG.md` |
+| Levantar o validar el lab | `docs/getting-started.md` |
+| Entrar a Wazuh, n8n, RHEL UI o Windows | `docs/accesos-y-credenciales.md` |
+| Operar una demo o revisar estado | `docs/operacion-diaria.md` |
+| Documentar un cambio nuevo | `docs/como-usar-la-documentacion.md` |
+
+### Como leer la documentacion
+
+No necesitas levantar ningun servidor para saber que cambio o como operar el lab.
+
+- En GitHub: abre `README.md`, `CHANGELOG.md` o cualquier archivo dentro de `docs/`.
+- En VS Code: abre un `.md` y presiona `Ctrl + Shift + V` para verlo con formato.
+- En Git: usa `git log --oneline -10` o `git diff HEAD~1` para revisar cambios recientes.
+- Con MkDocs: solo si quieres portal local con menu lateral y buscador.
+
+Para abrir el portal local:
+
+```powershell
+python -m pip install -r requirements-docs.txt
+mkdocs serve
+```
+
+Luego abre `http://127.0.0.1:8000`.
+
 ## Objetivo del MVP
 
 Construir una plataforma mínima viable que permita:

@@ -10,3 +10,4 @@ integrations/n8n/.env
 ansible/**/.vagrant/
 ansible/**/group_vars/windows_ad_lab.yml
 ansible/**/.vault_pass
+site/
